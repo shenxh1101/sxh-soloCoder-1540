@@ -63,10 +63,33 @@ export function initDatabase() {
       FOREIGN KEY (frame_id) REFERENCES frame_inventory(id)
     );
 
+    CREATE TABLE IF NOT EXISTS inventory_transactions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      item_type TEXT NOT NULL CHECK(item_type IN ('lens', 'frame')),
+      item_id INTEGER NOT NULL,
+      item_name TEXT NOT NULL,
+      change_type TEXT NOT NULL CHECK(change_type IN ('sale', 'restock', 'void_return')),
+      quantity INTEGER NOT NULL,
+      stock_before INTEGER NOT NULL,
+      stock_after INTEGER NOT NULL,
+      related_id INTEGER,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
     CREATE INDEX IF NOT EXISTS idx_records_customer ON optometry_records(customer_id);
     CREATE INDEX IF NOT EXISTS idx_records_created ON optometry_records(created_at);
+    CREATE INDEX IF NOT EXISTS idx_transactions_item ON inventory_transactions(item_type, item_id);
+    CREATE INDEX IF NOT EXISTS idx_transactions_created ON inventory_transactions(created_at);
   `);
+
+  try {
+    db.exec(`ALTER TABLE optometry_records ADD COLUMN status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'voided'))`);
+  } catch {}
+
+  try {
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_records_status ON optometry_records(status)`);
+  } catch {}
 
   const lensCount = db.prepare('SELECT COUNT(*) as count FROM lens_inventory').get() as { count: number };
   if (lensCount.count === 0) {

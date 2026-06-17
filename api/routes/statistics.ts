@@ -15,7 +15,7 @@ router.get('/monthly', (req: Request, res: Response) => {
         COALESCE(SUM(price), 0) as total_revenue,
         COALESCE(AVG(price), 0) as average_price
        FROM optometry_records
-       WHERE strftime('%Y', created_at) = ? AND strftime('%m', created_at) = ?`
+       WHERE status = 'active' AND strftime('%Y', created_at) = ? AND strftime('%m', created_at) = ?`
     )
     .get(year, month.padStart(2, '0')) as any;
 
@@ -41,7 +41,7 @@ router.get('/lenses', (req: Request, res: Response) => {
         COALESCE(SUM(o.price), 0) as revenue
        FROM optometry_records o
        LEFT JOIN lens_inventory l ON o.lens_id = l.id
-       WHERE strftime('%Y', o.created_at) = ? AND strftime('%m', o.created_at) = ?
+       WHERE o.status = 'active' AND strftime('%Y', o.created_at) = ? AND strftime('%m', o.created_at) = ?
        GROUP BY l.refractive_index
        ORDER BY l.refractive_index`
     )

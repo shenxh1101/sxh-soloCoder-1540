@@ -9,6 +9,7 @@ import {
   ShoppingBag,
   TrendingUp,
   ChevronRight,
+  ShoppingCart,
 } from 'lucide-react';
 import { useStore } from '../store';
 
@@ -24,7 +25,7 @@ export default function Dashboard() {
 
   const today = new Date().toDateString();
   const todayRecords = optometryRecords.filter(
-    (r) => new Date(r.createdAt).toDateString() === today
+    (r) => r.status === 'active' && new Date(r.createdAt).toDateString() === today
   );
   const todayRevenue = todayRecords.reduce((sum, r) => sum + (r.price || 0), 0);
 
@@ -62,14 +63,30 @@ export default function Dashboard() {
               <p className="text-sm text-red-600 mb-3">
                 有 {alerts.length} 种商品库存已低于安全库存，请及时补货
               </p>
-              <div className="flex flex-wrap gap-2">
+              <div className="space-y-2">
                 {alerts.map((alert) => (
-                  <span
+                  <div
                     key={`${alert.type}-${alert.id}`}
-                    className="px-3 py-1.5 bg-white rounded-lg text-sm border border-red-200 text-red-700"
+                    className="flex items-center justify-between bg-white rounded-lg px-4 py-2.5 border border-red-100"
                   >
-                    {alert.name}（库存 {alert.stock}，安全值 {alert.safetyStock}）
-                  </span>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-medium text-red-700">{alert.name}</span>
+                      <span className="text-xs text-slate-500">
+                        库存 {alert.stock} / 安全值 {alert.safetyStock}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                        <ShoppingCart className="w-3.5 h-3.5" />
+                        近30天售出 {alert.monthlySales}
+                      </div>
+                      {alert.suggestedRestock > 0 && (
+                        <span className="px-2.5 py-1 bg-accent-100 text-accent-700 text-xs font-semibold rounded-lg">
+                          建议补货 {alert.suggestedRestock} {alert.type === 'lens' ? '片' : '副'}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>
@@ -132,15 +149,11 @@ export default function Dashboard() {
                 to={action.path}
                 className="group flex items-center gap-4 p-4 rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-md transition-all duration-300"
               >
-                <div
-                  className={`w-12 h-12 bg-gradient-to-br ${action.color} rounded-xl flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-300`}
-                >
+                <div className={`w-12 h-12 bg-gradient-to-br ${action.color} rounded-xl flex items-center justify-center text-white group-hover:scale-110 transition-transform duration-300`}>
                   <Icon className="w-6 h-6" />
                 </div>
                 <div>
-                  <p className="font-medium text-slate-800 group-hover:text-primary-700 transition-colors">
-                    {action.label}
-                  </p>
+                  <p className="font-medium text-slate-800 group-hover:text-primary-700 transition-colors">{action.label}</p>
                   <p className="text-sm text-slate-500">点击进入</p>
                 </div>
                 <ChevronRight className="w-5 h-5 text-slate-300 ml-auto group-hover:text-primary-500 group-hover:translate-x-1 transition-all" />
@@ -154,10 +167,7 @@ export default function Dashboard() {
         <div className="card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-serif text-lg font-semibold text-slate-800">最近验光记录</h3>
-            <Link
-              to="/optometry"
-              className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
-            >
+            <Link to="/optometry" className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
               查看全部 <ChevronRight className="w-4 h-4" />
             </Link>
           </div>
@@ -174,14 +184,13 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {optometryRecords.slice(0, 5).map((record) => (
-                  <tr
-                    key={record.id}
-                    className="border-b border-slate-50 last:border-0 hover:bg-slate-50"
-                  >
+                {optometryRecords.filter(r => r.status === 'active').slice(0, 5).map((record) => (
+                  <tr key={record.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50">
                     <td className="py-3">
-                      <p className="font-medium text-slate-800">{record.customerName}</p>
-                      <p className="text-xs text-slate-500">{record.customerPhone}</p>
+                      <Link to={`/customers/${record.customerId}`} className="hover:text-primary-700">
+                        <p className="font-medium text-slate-800">{record.customerName}</p>
+                        <p className="text-xs text-slate-500">{record.customerPhone}</p>
+                      </Link>
                     </td>
                     <td className="py-3 text-sm text-slate-600">
                       {record.leftSphere}D {record.leftCylinder ? `/${record.leftCylinder}D` : ''}
@@ -190,12 +199,8 @@ export default function Dashboard() {
                       {record.rightSphere}D {record.rightCylinder ? `/${record.rightCylinder}D` : ''}
                     </td>
                     <td className="py-3 text-sm text-slate-600">{record.refractiveIndex}</td>
-                    <td className="py-3 text-sm font-medium text-accent-600">
-                      ¥{record.price?.toLocaleString()}
-                    </td>
-                    <td className="py-3 text-sm text-slate-500">
-                      {new Date(record.createdAt).toLocaleDateString('zh-CN')}
-                    </td>
+                    <td className="py-3 text-sm font-medium text-accent-600">¥{record.price?.toLocaleString()}</td>
+                    <td className="py-3 text-sm text-slate-500">{new Date(record.createdAt).toLocaleDateString('zh-CN')}</td>
                   </tr>
                 ))}
               </tbody>

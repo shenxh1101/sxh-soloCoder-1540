@@ -25,6 +25,7 @@ export interface OptometryRecord {
   frameBrand?: string;
   frameModel?: string;
   price: number;
+  status: 'active' | 'voided';
   createdAt: string;
 }
 
@@ -54,6 +55,8 @@ export interface InventoryAlert {
   name: string;
   stock: number;
   safetyStock: number;
+  monthlySales: number;
+  suggestedRestock: number;
 }
 
 export interface MonthlyStats {
@@ -66,4 +69,17 @@ export interface LensSalesStat {
   refractiveIndex: string;
   count: number;
   revenue: number;
+}
+
+export interface InventoryTransaction {
+  id: number;
+  itemType: 'lens' | 'frame';
+  itemId: number;
+  itemName: string;
+  changeType: 'sale' | 'restock' | 'void_return';
+  quantity: number;
+  stockBefore: number;
+  stockAfter: number;
+  relatedId: number | null;
+  createdAt: string;
 }

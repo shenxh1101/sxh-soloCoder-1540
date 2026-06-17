@@ -13,6 +13,7 @@ import type {
   InventoryAlert,
   MonthlyStats,
   LensSalesStat,
+  InventoryTransaction,
 } from '../../shared/types';
 
 interface AppState {
@@ -23,6 +24,7 @@ interface AppState {
   alerts: InventoryAlert[];
   monthlyStats: (MonthlyStats & { year: string; month: string }) | null;
   lensSalesStats: LensSalesStat[];
+  transactions: InventoryTransaction[];
   loading: boolean;
   error: string | null;
 
@@ -31,8 +33,11 @@ interface AppState {
   fetchInventory: () => Promise<void>;
   fetchAlerts: () => Promise<void>;
   fetchStatistics: (year?: string, month?: string) => Promise<void>;
+  fetchTransactions: (itemType?: string, year?: string, month?: string) => Promise<void>;
 
   createOptometry: (data: any) => Promise<number>;
+  updateOptometry: (id: number, data: Partial<OptometryRecord>) => Promise<void>;
+  voidOptometry: (id: number) => Promise<void>;
   restockLens: (id: number, quantity: number) => Promise<void>;
   restockFrame: (id: number, quantity: number) => Promise<void>;
 }
@@ -45,6 +50,7 @@ export const useStore = create<AppState>((set, get) => ({
   alerts: [],
   monthlyStats: null,
   lensSalesStats: [],
+  transactions: [],
   loading: false,
   error: null,
 
@@ -111,21 +117,41 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  fetchTransactions: async (itemType, year, month) => {
+    set({ loading: true, error: null });
+    try {
+      const data = await inventoryApi.transactions(itemType, year, month);
+      set({ transactions: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
   createOptometry: async (data) => {
     const result = await optometryApi.create(data);
     await Promise.all([get().fetchInventory(), get().fetchAlerts()]);
     return result.id;
   },
 
+  updateOptometry: async (id, data) => {
+    await optometryApi.update(id, data);
+    await get().fetchOptometryRecords();
+  },
+
+  voidOptometry: async (id) => {
+    await optometryApi.void(id);
+    await Promise.all([get().fetchOptometryRecords(), get().fetchInventory(), get().fetchAlerts()]);
+  },
+
   restockLens: async (id, quantity) => {
     await inventoryApi.restockLens(id, quantity);
-    await get().fetchInventory();
-    await get().fetchAlerts();
+    await Promise.all([get().fetchInventory(), get().fetchAlerts()]);
   },
 
   restockFrame: async (id, quantity) => {
     await inventoryApi.restockFrame(id, quantity);
-    await get().fetchInventory();
-    await get().fetchAlerts();
+    await Promise.all([get().fetchInventory(), get().fetchAlerts()]);
   },
 }));

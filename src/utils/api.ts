@@ -6,6 +6,7 @@ import type {
   InventoryAlert,
   MonthlyStats,
   LensSalesStat,
+  InventoryTransaction,
 } from '../../shared/types';
 
 const API_BASE = '/api';
@@ -66,6 +67,15 @@ export const optometryApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  update: (id: number, data: Partial<OptometryRecord>) =>
+    request<OptometryRecord>(`/optometry/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  void: (id: number) =>
+    request<{ id: number; success: boolean }>(`/optometry/${id}/void`, {
+      method: 'POST',
+    }),
 };
 
 export const inventoryApi = {
@@ -92,6 +102,15 @@ export const inventoryApi = {
       body: JSON.stringify(data),
     }),
   alerts: () => request<InventoryAlert[]>('/inventory/alerts'),
+  transactions: (itemType?: string, year?: string, month?: string) => {
+    const params = new URLSearchParams();
+    if (itemType) params.set('itemType', itemType);
+    if (year) params.set('year', year);
+    if (month) params.set('month', month);
+    return request<InventoryTransaction[]>(
+      `/inventory/transactions${params.toString() ? `?${params.toString()}` : ''}`
+    );
+  },
 };
 
 export const statisticsApi = {

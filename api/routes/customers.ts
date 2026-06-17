@@ -11,7 +11,7 @@ router.get('/', (req: Request, res: Response) => {
     rows = db
       .prepare(
         `SELECT c.*, 
-         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id) as last_visit
+         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') as last_visit
          FROM customers c 
          WHERE c.name LIKE ? OR c.phone LIKE ? 
          ORDER BY c.updated_at DESC`
@@ -21,7 +21,7 @@ router.get('/', (req: Request, res: Response) => {
     rows = db
       .prepare(
         `SELECT c.*, 
-         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id) as last_visit
+         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') as last_visit
          FROM customers c 
          ORDER BY c.updated_at DESC`
       )
@@ -85,6 +85,7 @@ router.get('/:id', (req: Request, res: Response) => {
     frameBrand: row.frame_brand,
     frameModel: row.frame_model,
     price: row.price,
+    status: row.status,
     createdAt: row.created_at,
   }));
 

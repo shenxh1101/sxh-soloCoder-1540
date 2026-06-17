@@ -18,12 +18,17 @@ router.get('/', (req: Request, res: Response) => {
   `;
   const params: any[] = [];
 
+  const conditions: string[] = [];
   if (year && month) {
-    query += ` WHERE strftime('%Y', o.created_at) = ? AND strftime('%m', o.created_at) = ?`;
+    conditions.push(`strftime('%Y', o.created_at) = ? AND strftime('%m', o.created_at) = ?`);
     params.push(year, month.padStart(2, '0'));
   }
 
-  query += ' ORDER BY o.created_at DESC LIMIT 100';
+  if (conditions.length > 0) {
+    query += ` WHERE ${conditions.join(' AND ')}`;
+  }
+
+  query += ' ORDER BY o.created_at DESC LIMIT 200';
 
   const rows = db.prepare(query).all(...params);
 
@@ -46,6 +51,7 @@ router.get('/', (req: Request, res: Response) => {
     frameBrand: row.frame_brand,
     frameModel: row.frame_model,
     price: row.price,
+    status: row.status,
     createdAt: row.created_at,
   }));
 
@@ -91,6 +97,7 @@ router.get('/:id', (req: Request, res: Response) => {
     frameBrand: row.frame_brand,
     frameModel: row.frame_model,
     price: row.price,
+    status: row.status,
     createdAt: row.created_at,
   };
 
@@ -144,8 +151,21 @@ router.post('/', (req: Request, res: Response) => {
       );
     }
 
+    const lensBefore = (db.prepare('SELECT stock FROM lens_inventory WHERE id = ?').get(lensId) as any).stock;
     db.prepare('UPDATE lens_inventory SET stock = stock - 1 WHERE id = ?').run(lensId);
+    const lensAfter = lensBefore - 1;
+    db.prepare(
+      `INSERT INTO inventory_transactions (item_type, item_id, item_name, change_type, quantity, stock_before, stock_after, related_id)
+       VALUES ('lens', ?, ?, 'sale', -1, ?, ?, ?)`
+    ).run(lensId, lens.name, lensBefore, lensAfter, null);
+
+    const frameBefore = (db.prepare('SELECT stock FROM frame_inventory WHERE id = ?').get(frameId) as any).stock;
     db.prepare('UPDATE frame_inventory SET stock = stock - 1 WHERE id = ?').run(frameId);
+    const frameAfter = frameBefore - 1;
+    db.prepare(
+      `INSERT INTO inventory_transactions (item_type, item_id, item_name, change_type, quantity, stock_before, stock_after, related_id)
+       VALUES ('frame', ?, ?, 'sale', -1, ?, ?, ?)`
+    ).run(frameId, `${frame.brand} ${frame.model}`, frameBefore, frameAfter, null);
 
     const result = db
       .prepare(
@@ -167,7 +187,10 @@ router.post('/', (req: Request, res: Response) => {
         price || 0
       );
 
-    return result.lastInsertRowid;
+    const recordId = result.lastInsertRowid;
+    db.prepare('UPDATE inventory_transactions SET related_id = ? WHERE related_id IS NULL').run(recordId);
+
+    return recordId;
   });
 
   try {
@@ -176,6 +199,130 @@ router.post('/', (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '保存验光记录失败' });
+  }
+});
+
+router.put('/:id', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const existing = db.prepare('SELECT * FROM optometry_records WHERE id = ?').get(id) as any;
+
+  if (!existing) {
+    res.status(404).json({ error: '验光记录不存在' });
+    return;
+  }
+  if (existing.status === 'voided') {
+    res.status(400).json({ error: '已作废的记录不能编辑' });
+    return;
+  }
+
+  const {
+    leftSphere,
+    leftCylinder,
+    leftAxis,
+    rightSphere,
+    rightCylinder,
+    rightAxis,
+    pd,
+    price,
+  } = req.body;
+
+  db.prepare(
+    `UPDATE optometry_records 
+     SET left_sphere = COALESCE(?, left_sphere),
+         left_cylinder = COALESCE(?, left_cylinder),
+         left_axis = COALESCE(?, left_axis),
+         right_sphere = COALESCE(?, right_sphere),
+         right_cylinder = COALESCE(?, right_cylinder),
+         right_axis = COALESCE(?, right_axis),
+         pd = COALESCE(?, pd),
+         price = COALESCE(?, price)
+     WHERE id = ?`
+  ).run(
+    leftSphere, leftCylinder, leftAxis,
+    rightSphere, rightCylinder, rightAxis,
+    pd, price, id
+  );
+
+  const updated = db
+    .prepare(
+      `SELECT o.*, c.name as customer_name, c.phone as customer_phone,
+              l.name as lens_name, l.refractive_index,
+              f.brand as frame_brand, f.model as frame_model
+       FROM optometry_records o
+       LEFT JOIN customers c ON o.customer_id = c.id
+       LEFT JOIN lens_inventory l ON o.lens_id = l.id
+       LEFT JOIN frame_inventory f ON o.frame_id = f.id
+       WHERE o.id = ?`
+    )
+    .get(id) as any;
+
+  res.json({
+    id: updated.id,
+    customerId: updated.customer_id,
+    customerName: updated.customer_name,
+    customerPhone: updated.customer_phone,
+    leftSphere: updated.left_sphere,
+    leftCylinder: updated.left_cylinder,
+    leftAxis: updated.left_axis,
+    rightSphere: updated.right_sphere,
+    rightCylinder: updated.right_cylinder,
+    rightAxis: updated.right_axis,
+    pd: updated.pd,
+    lensId: updated.lens_id,
+    lensName: updated.lens_name,
+    refractiveIndex: updated.refractive_index,
+    frameId: updated.frame_id,
+    frameBrand: updated.frame_brand,
+    frameModel: updated.frame_model,
+    price: updated.price,
+    status: updated.status,
+    createdAt: updated.created_at,
+  });
+});
+
+router.post('/:id/void', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const existing = db.prepare('SELECT * FROM optometry_records WHERE id = ?').get(id) as any;
+
+  if (!existing) {
+    res.status(404).json({ error: '验光记录不存在' });
+    return;
+  }
+  if (existing.status === 'voided') {
+    res.status(400).json({ error: '该记录已经作废' });
+    return;
+  }
+
+  const tx = db.transaction(() => {
+    db.prepare('UPDATE optometry_records SET status = ? WHERE id = ?').run('voided', id);
+
+    const lens = db.prepare('SELECT * FROM lens_inventory WHERE id = ?').get(existing.lens_id) as any;
+    const lensBefore = lens.stock;
+    db.prepare('UPDATE lens_inventory SET stock = stock + 1 WHERE id = ?').run(existing.lens_id);
+    const lensAfter = lensBefore + 1;
+    db.prepare(
+      `INSERT INTO inventory_transactions (item_type, item_id, item_name, change_type, quantity, stock_before, stock_after, related_id)
+       VALUES ('lens', ?, ?, 'void_return', 1, ?, ?, ?)`
+    ).run(existing.lens_id, lens.name, lensBefore, lensAfter, id);
+
+    const frame = db.prepare('SELECT * FROM frame_inventory WHERE id = ?').get(existing.frame_id) as any;
+    const frameBefore = frame.stock;
+    db.prepare('UPDATE frame_inventory SET stock = stock + 1 WHERE id = ?').run(existing.frame_id);
+    const frameAfter = frameBefore + 1;
+    db.prepare(
+      `INSERT INTO inventory_transactions (item_type, item_id, item_name, change_type, quantity, stock_before, stock_after, related_id)
+       VALUES ('frame', ?, ?, 'void_return', 1, ?, ?, ?)`
+    ).run(existing.frame_id, `${frame.brand} ${frame.model}`, frameBefore, frameAfter, id);
+
+    return id;
+  });
+
+  try {
+    tx();
+    res.json({ id, success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '作废记录失败' });
   }
 });
 
