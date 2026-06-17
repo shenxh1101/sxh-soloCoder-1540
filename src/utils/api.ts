@@ -7,6 +7,9 @@ import type {
   MonthlyStats,
   LensSalesStat,
   InventoryTransaction,
+  FollowUpRecord,
+  PurchaseOrder,
+  CustomerDetailResponse,
 } from '../../shared/types';
 
 const API_BASE = '/api';
@@ -31,7 +34,18 @@ export const customersApi = {
       `/customers${search ? `?search=${encodeURIComponent(search)}` : ''}`
     ),
   get: (id: number) =>
-    request<{ customer: Customer; records: OptometryRecord[] }>(`/customers/${id}`),
+    request<CustomerDetailResponse>(`/customers/${id}`),
+  getFollowUps: (id: number) =>
+    request<FollowUpRecord[]>(`/customers/${id}/follow-ups`),
+  addFollowUp: (id: number, data: { type: 'phone' | 'visit' | 'other'; result: string; notes?: string }) =>
+    request<FollowUpRecord>(`/customers/${id}/follow-ups`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  getDueForReview: () =>
+    request<(Customer & { lastVisit: string; nextReviewDate: string; daysUntilReview: number })[]>(
+      '/customers/due-for-review'
+    ),
   create: (name: string, phone: string) =>
     request<Customer & { isNew?: boolean }>('/customers', {
       method: 'POST',
@@ -40,10 +54,11 @@ export const customersApi = {
 };
 
 export const optometryApi = {
-  list: (year?: string, month?: string) => {
+  list: (year?: string, month?: string, includeVoided?: boolean) => {
     const params = new URLSearchParams();
     if (year) params.set('year', year);
     if (month) params.set('month', month);
+    if (includeVoided) params.set('includeVoided', 'true');
     return request<OptometryRecord[]>(
       `/optometry${params.toString() ? `?${params.toString()}` : ''}`
     );
@@ -111,6 +126,17 @@ export const inventoryApi = {
       `/inventory/transactions${params.toString() ? `?${params.toString()}` : ''}`
     );
   },
+  purchaseOrders: () =>
+    request<PurchaseOrder[]>('/inventory/purchase-orders'),
+  createPurchaseOrder: (items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[]) =>
+    request<PurchaseOrder>('/inventory/purchase-orders', {
+      method: 'POST',
+      body: JSON.stringify({ items }),
+    }),
+  completePurchaseOrder: (id: number) =>
+    request<{ id: number; success: boolean; message: string }>(`/inventory/purchase-orders/${id}/complete`, {
+      method: 'POST',
+    }),
 };
 
 export const statisticsApi = {

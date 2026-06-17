@@ -76,10 +76,47 @@ export interface InventoryTransaction {
   itemType: 'lens' | 'frame';
   itemId: number;
   itemName: string;
-  changeType: 'sale' | 'restock' | 'void_return';
+  changeType: 'sale' | 'restock' | 'void_return' | 'exchange_return' | 'exchange_sale' | 'purchase_restock';
   quantity: number;
   stockBefore: number;
   stockAfter: number;
   relatedId: number | null;
   createdAt: string;
+}
+
+export interface FollowUpRecord {
+  id: number;
+  customerId: number;
+  type: 'phone' | 'visit' | 'other';
+  result: string;
+  notes: string;
+  createdAt: string;
+}
+
+export interface PurchaseOrder {
+  id: number;
+  status: 'pending' | 'completed';
+  totalAmount: number;
+  createdAt: string;
+  completedAt: string | null;
+  items: PurchaseOrderItem[];
+}
+
+export interface PurchaseOrderItem {
+  id: number;
+  purchaseOrderId: number;
+  itemType: 'lens' | 'frame';
+  itemId: number;
+  itemName: string;
+  quantity: number;
+  costPrice: number;
+  createdAt: string;
+}
+
+export interface CustomerDetailResponse {
+  customer: Customer;
+  records: OptometryRecord[];
+  followUps: FollowUpRecord[];
+  nextReviewDate: string | null;
+  daysUntilReview: number | null;
 }

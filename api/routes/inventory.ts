@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.js';
+import type { PurchaseOrder, PurchaseOrderItem } from '../../shared/types.js';
 
 const router = Router();
 
@@ -249,6 +250,178 @@ router.get('/transactions', (req: Request, res: Response) => {
   }));
 
   res.json(transactions);
+});
+
+router.get('/purchase-orders', (_req: Request, res: Response) => {
+  const rows = db.prepare(`
+    SELECT po.*,
+           COALESCE(SUM(poi.quantity * poi.cost_price), 0) as total_amount
+    FROM purchase_orders po
+    LEFT JOIN purchase_order_items poi ON po.id = poi.purchase_order_id
+    GROUP BY po.id
+    ORDER BY po.created_at DESC
+  `).all();
+
+  const orders = rows.map((row: any) => {
+    const items = db.prepare(`
+      SELECT * FROM purchase_order_items WHERE purchase_order_id = ?
+    `).all(row.id) as any[];
+
+    return {
+      id: row.id,
+      status: row.status,
+      totalAmount: row.total_amount,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+      items: items.map((item: any) => ({
+        id: item.id,
+        purchaseOrderId: item.purchase_order_id,
+        itemType: item.item_type,
+        itemId: item.item_id,
+        itemName: item.item_name,
+        quantity: item.quantity,
+        costPrice: item.cost_price,
+        createdAt: item.created_at,
+      })),
+    };
+  });
+
+  res.json(orders);
+});
+
+router.post('/purchase-orders', (req: Request, res: Response) => {
+  const { items } = req.body as {
+    items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[];
+  };
+
+  if (!items || items.length === 0) {
+    res.status(400).json({ error: '采购单至少需要一个商品' });
+    return;
+  }
+
+  const tx = db.transaction(() => {
+    const poResult = db.prepare(`
+      INSERT INTO purchase_orders (status) VALUES ('pending')
+    `).run();
+    const poId = poResult.lastInsertRowid;
+
+    let totalAmount = 0;
+    const insertItem = db.prepare(`
+      INSERT INTO purchase_order_items 
+      (purchase_order_id, item_type, item_id, item_name, quantity, cost_price)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    items.forEach((item) => {
+      let itemName = '';
+      let costPrice = 0;
+
+      if (item.itemType === 'lens') {
+        const lens = db.prepare('SELECT * FROM lens_inventory WHERE id = ?').get(item.itemId) as any;
+        if (!lens) throw new Error(`镜片 ID ${item.itemId} 不存在`);
+        itemName = lens.name;
+        costPrice = lens.costPrice;
+      } else {
+        const frame = db.prepare('SELECT * FROM frame_inventory WHERE id = ?').get(item.itemId) as any;
+        if (!frame) throw new Error(`镜架 ID ${item.itemId} 不存在`);
+        itemName = `${frame.brand} ${frame.model}`;
+        costPrice = frame.costPrice;
+      }
+
+      insertItem.run(poId, item.itemType, item.itemId, itemName, item.quantity, costPrice);
+      totalAmount += item.quantity * costPrice;
+    });
+
+    db.prepare('UPDATE purchase_orders SET total_amount = ? WHERE id = ?').run(totalAmount, poId);
+    return poId;
+  });
+
+  try {
+    const poId = tx();
+    const orderRow = db.prepare(`
+      SELECT po.*,
+             COALESCE(SUM(poi.quantity * poi.cost_price), 0) as total_amount
+      FROM purchase_orders po
+      LEFT JOIN purchase_order_items poi ON po.id = poi.purchase_order_id
+      WHERE po.id = ?
+      GROUP BY po.id
+    `).get(poId) as any;
+
+    const items = db.prepare(`
+      SELECT * FROM purchase_order_items WHERE purchase_order_id = ?
+    `).all(poId) as any[];
+
+    const order: PurchaseOrder = {
+      id: orderRow.id,
+      status: orderRow.status,
+      totalAmount: orderRow.total_amount,
+      createdAt: orderRow.created_at,
+      completedAt: orderRow.completed_at,
+      items: items.map((item: any) => ({
+        id: item.id,
+        purchaseOrderId: item.purchase_order_id,
+        itemType: item.item_type,
+        itemId: item.item_id,
+        itemName: item.item_name,
+        quantity: item.quantity,
+        costPrice: item.cost_price,
+        createdAt: item.created_at,
+      })),
+    };
+
+    res.json(order);
+  } catch (err: any) {
+    res.status(400).json({ error: err.message || '创建采购单失败' });
+  }
+});
+
+router.post('/purchase-orders/:id/complete', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const poRow = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
+
+  if (!poRow) {
+    res.status(404).json({ error: '采购单不存在' });
+    return;
+  }
+  if (poRow.status === 'completed') {
+    res.status(400).json({ error: '该采购单已完成' });
+    return;
+  }
+
+  const tx = db.transaction(() => {
+    const items = db.prepare('SELECT * FROM purchase_order_items WHERE purchase_order_id = ?').all(id) as any[];
+
+    items.forEach((item) => {
+      let stockBefore = 0;
+      if (item.item_type === 'lens') {
+        stockBefore = (db.prepare('SELECT stock FROM lens_inventory WHERE id = ?').get(item.item_id) as any).stock;
+        db.prepare('UPDATE lens_inventory SET stock = stock + ? WHERE id = ?').run(item.quantity, item.item_id);
+      } else {
+        stockBefore = (db.prepare('SELECT stock FROM frame_inventory WHERE id = ?').get(item.item_id) as any).stock;
+        db.prepare('UPDATE frame_inventory SET stock = stock + ? WHERE id = ?').run(item.quantity, item.item_id);
+      }
+      const stockAfter = stockBefore + item.quantity;
+
+      db.prepare(`
+        INSERT INTO inventory_transactions 
+        (item_type, item_id, item_name, change_type, quantity, stock_before, stock_after, related_id)
+        VALUES (?, ?, ?, 'purchase_restock', ?, ?, ?, ?)
+      `).run(item.item_type, item.item_id, item.item_name, item.quantity, stockBefore, stockAfter, id);
+    });
+
+    db.prepare(`
+      UPDATE purchase_orders 
+      SET status = 'completed', completed_at = CURRENT_TIMESTAMP 
+      WHERE id = ?
+    `).run(id);
+  });
+
+  try {
+    tx();
+    res.json({ id, success: true, message: '采购单已完成，商品已入库' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || '完成采购单失败' });
+  }
 });
 
 export default router;

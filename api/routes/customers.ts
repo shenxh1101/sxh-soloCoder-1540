@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.js';
-import type { Customer, OptometryRecord } from '../../shared/types.js';
+import type { Customer, OptometryRecord, FollowUpRecord, CustomerDetailResponse } from '../../shared/types.js';
 
 const router = Router();
 
@@ -36,6 +36,41 @@ router.get('/', (req: Request, res: Response) => {
     updatedAt: row.updated_at,
     lastVisit: row.last_visit,
   }));
+
+  res.json(customers);
+});
+
+router.get('/due-for-review', (_req: Request, res: Response) => {
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const sixMonthsStr = sixMonthsAgo.toISOString().slice(0, 10);
+
+  const rows = db
+    .prepare(
+      `SELECT c.*,
+         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') as last_visit
+       FROM customers c
+       WHERE (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') <= ?
+       ORDER BY last_visit ASC`
+    )
+    .all(sixMonthsStr);
+
+  const customers = rows.map((row: any) => {
+    const lastVisit = new Date(row.last_visit);
+    const nextReview = new Date(lastVisit);
+    nextReview.setMonth(nextReview.getMonth() + 6);
+    const today = new Date();
+    const daysUntilReview = Math.ceil((nextReview.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    return {
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      lastVisit: row.last_visit,
+      nextReviewDate: nextReview.toISOString().slice(0, 10),
+      daysUntilReview,
+    };
+  });
 
   res.json(customers);
 });
@@ -89,7 +124,99 @@ router.get('/:id', (req: Request, res: Response) => {
     createdAt: row.created_at,
   }));
 
-  res.json({ customer, records });
+  const followUpRows = db
+    .prepare('SELECT * FROM follow_up_records WHERE customer_id = ? ORDER BY created_at DESC')
+    .all(id);
+
+  const followUps: FollowUpRecord[] = followUpRows.map((row: any) => ({
+    id: row.id,
+    customerId: row.customer_id,
+    type: row.type,
+    result: row.result,
+    notes: row.notes,
+    createdAt: row.created_at,
+  }));
+
+  const lastActiveRecord = records.find((r) => r.status === 'active');
+  let nextReviewDate: string | null = null;
+  let daysUntilReview: number | null = null;
+
+  if (lastActiveRecord) {
+    const lastVisit = new Date(lastActiveRecord.createdAt);
+    const nextReview = new Date(lastVisit);
+    nextReview.setMonth(nextReview.getMonth() + 6);
+    nextReviewDate = nextReview.toISOString().slice(0, 10);
+    const today = new Date();
+    daysUntilReview = Math.ceil((nextReview.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  }
+
+  const response: CustomerDetailResponse = {
+    customer,
+    records,
+    followUps,
+    nextReviewDate,
+    daysUntilReview,
+  };
+
+  res.json(response);
+});
+
+router.get('/:id/follow-ups', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const customerExists = db.prepare('SELECT id FROM customers WHERE id = ?').get(id);
+
+  if (!customerExists) {
+    res.status(404).json({ error: '客户不存在' });
+    return;
+  }
+
+  const rows = db
+    .prepare('SELECT * FROM follow_up_records WHERE customer_id = ? ORDER BY created_at DESC')
+    .all(id);
+
+  const followUps: FollowUpRecord[] = rows.map((row: any) => ({
+    id: row.id,
+    customerId: row.customer_id,
+    type: row.type,
+    result: row.result,
+    notes: row.notes,
+    createdAt: row.created_at,
+  }));
+
+  res.json(followUps);
+});
+
+router.post('/:id/follow-ups', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const { type, result, notes } = req.body;
+
+  const customerExists = db.prepare('SELECT id FROM customers WHERE id = ?').get(id);
+  if (!customerExists) {
+    res.status(404).json({ error: '客户不存在' });
+    return;
+  }
+
+  if (!type || !result) {
+    res.status(400).json({ error: '回访类型和结果不能为空' });
+    return;
+  }
+
+  const insertResult = db
+    .prepare(
+      'INSERT INTO follow_up_records (customer_id, type, result, notes) VALUES (?, ?, ?, ?)'
+    )
+    .run(id, type, result, notes || '');
+
+  const newRecord = db.prepare('SELECT * FROM follow_up_records WHERE id = ?').get(insertResult.lastInsertRowid) as any;
+
+  res.json({
+    id: newRecord.id,
+    customerId: newRecord.customer_id,
+    type: newRecord.type,
+    result: newRecord.result,
+    notes: newRecord.notes,
+    createdAt: newRecord.created_at,
+  });
 });
 
 router.post('/', (req: Request, res: Response) => {

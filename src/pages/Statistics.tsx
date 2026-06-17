@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   BarChart,
   Bar,
@@ -9,23 +9,25 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { Eye, TrendingUp, DollarSign, Award } from 'lucide-react';
+import { Eye, TrendingUp, DollarSign, Award, Download } from 'lucide-react';
 import { useStore } from '../store';
+import { exportToCSV } from '../utils/export';
 
 const BAR_COLORS = ['#1e40af', '#d97706', '#059669'];
 
 export default function Statistics() {
   const now = new Date();
-  const year = now.getFullYear().toString();
-  const month = (now.getMonth() + 1).toString();
+  const [year, setYear] = useState(now.getFullYear().toString());
+  const [month, setMonth] = useState((now.getMonth() + 1).toString());
 
-  const { monthlyStats, lensSalesStats, fetchStatistics, fetchOptometryRecords, optometryRecords } =
+  const { monthlyStats, lensSalesStats, fetchStatistics, fetchOptometryRecords, optometryRecords, transactions, fetchTransactions } =
     useStore();
 
   useEffect(() => {
     fetchStatistics(year, month);
-    fetchOptometryRecords(year, month);
-  }, [fetchStatistics, fetchOptometryRecords, year, month]);
+    fetchOptometryRecords(year, month, false);
+    fetchTransactions(undefined, year, month);
+  }, [fetchStatistics, fetchOptometryRecords, fetchTransactions, year, month]);
 
   const chartData = lensSalesStats.map((s) => ({
     name: `${s.refractiveIndex}`,
@@ -38,8 +40,114 @@ export default function Statistics() {
     { refractiveIndex: '-', count: 0, revenue: 0 }
   );
 
+  const handleExportSales = () => {
+    const exportData = optometryRecords.map((r) => ({
+      id: r.id,
+      date: new Date(r.createdAt).toLocaleString('zh-CN'),
+      customerName: r.customerName,
+      customerPhone: r.customerPhone,
+      leftSphere: r.leftSphere,
+      leftCylinder: r.leftCylinder,
+      leftAxis: r.leftAxis,
+      rightSphere: r.rightSphere,
+      rightCylinder: r.rightCylinder,
+      rightAxis: r.rightAxis,
+      pd: r.pd,
+      refractiveIndex: r.refractiveIndex,
+      lensName: r.lensName,
+      frame: `${r.frameBrand} ${r.frameModel}`,
+      price: r.price,
+    }));
+
+    exportToCSV(
+      exportData,
+      `${year}年${month}月销售明细`,
+      [
+        { key: 'id', label: '单号' },
+        { key: 'date', label: '时间' },
+        { key: 'customerName', label: '客户姓名' },
+        { key: 'customerPhone', label: '客户电话' },
+        { key: 'leftSphere', label: '左眼球镜' },
+        { key: 'leftCylinder', label: '左眼散光' },
+        { key: 'leftAxis', label: '左眼轴位' },
+        { key: 'rightSphere', label: '右眼球镜' },
+        { key: 'rightCylinder', label: '右眼散光' },
+        { key: 'rightAxis', label: '右眼轴位' },
+        { key: 'pd', label: '瞳距' },
+        { key: 'refractiveIndex', label: '折射率' },
+        { key: 'lensName', label: '镜片' },
+        { key: 'frame', label: '镜架' },
+        { key: 'price', label: '金额' },
+      ]
+    );
+  };
+
+  const handleExportTransactions = () => {
+    const changeTypeLabel: Record<string, string> = {
+      sale: '销售出库',
+      restock: '手动入库',
+      void_return: '作废退回',
+      exchange_return: '换货退回',
+      exchange_sale: '换货出库',
+      purchase_restock: '采购入库',
+    };
+
+    const exportData = transactions.map((tx) => ({
+      id: tx.id,
+      date: new Date(tx.createdAt).toLocaleString('zh-CN'),
+      itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
+      itemName: tx.itemName,
+      changeType: changeTypeLabel[tx.changeType] || tx.changeType,
+      quantity: tx.quantity,
+      stockBefore: tx.stockBefore,
+      stockAfter: tx.stockAfter,
+      relatedId: tx.relatedId || '-',
+    }));
+
+    exportToCSV(
+      exportData,
+      `${year}年${month}月库存流水`,
+      [
+        { key: 'id', label: '单号' },
+        { key: 'date', label: '时间' },
+        { key: 'itemType', label: '类型' },
+        { key: 'itemName', label: '商品' },
+        { key: 'changeType', label: '变动类型' },
+        { key: 'quantity', label: '数量' },
+        { key: 'stockBefore', label: '变动前库存' },
+        { key: 'stockAfter', label: '变动后库存' },
+        { key: 'relatedId', label: '关联单号' },
+      ]
+    );
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <select value={year} onChange={(e) => setYear(e.target.value)} className="input-field w-28">
+            {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map((y) => (
+              <option key={y} value={y}>{y}年</option>
+            ))}
+          </select>
+          <select value={month} onChange={(e) => setMonth(e.target.value)} className="input-field w-24">
+            {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+              <option key={m} value={m}>{m}月</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={handleExportSales} className="btn-outline flex items-center gap-2">
+            <Download className="w-4 h-4" />
+            导出销售明细
+          </button>
+          <button onClick={handleExportTransactions} className="btn-outline flex items-center gap-2">
+            <Download className="w-4 h-4" />
+            导出库存流水
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3">
@@ -191,7 +299,7 @@ export default function Statistics() {
 
       <div className="card p-6">
         <h3 className="font-serif text-lg font-semibold text-slate-800 mb-4">本月销售明细</h3>
-        {optometryRecords.length === 0 ? (
+        {optometryRecords.filter(r => r.status === 'active').length === 0 ? (
           <div className="py-16 text-center text-slate-400">暂无销售记录</div>
         ) : (
           <div className="overflow-x-auto">
@@ -206,7 +314,9 @@ export default function Statistics() {
                 </tr>
               </thead>
               <tbody>
-                {optometryRecords.map((record) => (
+                {optometryRecords
+                  .filter(r => r.status === 'active')
+                  .map((record) => (
                   <tr
                     key={record.id}
                     className="border-t border-slate-50 hover:bg-slate-50"

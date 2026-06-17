@@ -14,10 +14,14 @@ import type {
   MonthlyStats,
   LensSalesStat,
   InventoryTransaction,
+  FollowUpRecord,
+  PurchaseOrder,
+  CustomerDetailResponse,
 } from '../../shared/types';
 
 interface AppState {
   customers: (Customer & { lastVisit?: string })[];
+  customerDetail: CustomerDetailResponse | null;
   optometryRecords: OptometryRecord[];
   lenses: LensInventory[];
   frames: FrameInventory[];
@@ -25,25 +29,32 @@ interface AppState {
   monthlyStats: (MonthlyStats & { year: string; month: string }) | null;
   lensSalesStats: LensSalesStat[];
   transactions: InventoryTransaction[];
+  purchaseOrders: PurchaseOrder[];
   loading: boolean;
   error: string | null;
 
   fetchCustomers: (search?: string) => Promise<void>;
-  fetchOptometryRecords: (year?: string, month?: string) => Promise<void>;
+  fetchCustomerDetail: (id: number) => Promise<void>;
+  fetchOptometryRecords: (year?: string, month?: string, includeVoided?: boolean) => Promise<void>;
   fetchInventory: () => Promise<void>;
   fetchAlerts: () => Promise<void>;
   fetchStatistics: (year?: string, month?: string) => Promise<void>;
   fetchTransactions: (itemType?: string, year?: string, month?: string) => Promise<void>;
+  fetchPurchaseOrders: () => Promise<void>;
 
   createOptometry: (data: any) => Promise<number>;
   updateOptometry: (id: number, data: Partial<OptometryRecord>) => Promise<void>;
   voidOptometry: (id: number) => Promise<void>;
   restockLens: (id: number, quantity: number) => Promise<void>;
   restockFrame: (id: number, quantity: number) => Promise<void>;
+  addFollowUp: (customerId: number, data: { type: 'phone' | 'visit' | 'other'; result: string; notes?: string }) => Promise<FollowUpRecord>;
+  createPurchaseOrder: (items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[]) => Promise<PurchaseOrder>;
+  completePurchaseOrder: (id: number) => Promise<void>;
 }
 
 export const useStore = create<AppState>((set, get) => ({
   customers: [],
+  customerDetail: null,
   optometryRecords: [],
   lenses: [],
   frames: [],
@@ -51,6 +62,7 @@ export const useStore = create<AppState>((set, get) => ({
   monthlyStats: null,
   lensSalesStats: [],
   transactions: [],
+  purchaseOrders: [],
   loading: false,
   error: null,
 
@@ -66,10 +78,22 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  fetchOptometryRecords: async (year, month) => {
+  fetchCustomerDetail: async (id) => {
     set({ loading: true, error: null });
     try {
-      const data = await optometryApi.list(year, month);
+      const data = await customersApi.get(id);
+      set({ customerDetail: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  fetchOptometryRecords: async (year, month, includeVoided) => {
+    set({ loading: true, error: null });
+    try {
+      const data = await optometryApi.list(year, month, includeVoided);
       set({ optometryRecords: data });
     } catch (e: any) {
       set({ error: e.message });
@@ -153,5 +177,41 @@ export const useStore = create<AppState>((set, get) => ({
   restockFrame: async (id, quantity) => {
     await inventoryApi.restockFrame(id, quantity);
     await Promise.all([get().fetchInventory(), get().fetchAlerts()]);
+  },
+
+  addFollowUp: async (customerId, data) => {
+    const result = await customersApi.addFollowUp(customerId, data);
+    if (get().customerDetail?.customer.id === customerId) {
+      await get().fetchCustomerDetail(customerId);
+    }
+    return result;
+  },
+
+  fetchPurchaseOrders: async () => {
+    set({ loading: true, error: null });
+    try {
+      const data = await inventoryApi.purchaseOrders();
+      set({ purchaseOrders: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  createPurchaseOrder: async (items) => {
+    const result = await inventoryApi.createPurchaseOrder(items);
+    await get().fetchPurchaseOrders();
+    return result;
+  },
+
+  completePurchaseOrder: async (id) => {
+    await inventoryApi.completePurchaseOrder(id);
+    await Promise.all([
+      get().fetchPurchaseOrders(),
+      get().fetchInventory(),
+      get().fetchAlerts(),
+      get().fetchTransactions(),
+    ]);
   },
 }));

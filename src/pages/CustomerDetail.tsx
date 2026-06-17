@@ -1,6 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, User, Phone, Calendar, Eye, XCircle } from 'lucide-react';
+import {
+  ArrowLeft,
+  User,
+  Phone,
+  Calendar,
+  Eye,
+  XCircle,
+  Clock,
+  PhoneCall,
+  Plus,
+  Download,
+  MessageCircle,
+  CheckCircle,
+  AlertTriangle,
+} from 'lucide-react';
 import {
   LineChart,
   Line,
@@ -11,29 +25,25 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { customersApi } from '../utils/api';
-import type { Customer, OptometryRecord } from '../../shared/types';
+import { useStore } from '../store';
+import { exportToCSV } from '../utils/export';
+import type { CustomerDetailResponse } from '../../shared/types';
 
 export default function CustomerDetail() {
   const { id } = useParams<{ id: string }>();
-  const [data, setData] = useState<{ customer: Customer; records: OptometryRecord[] } | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { customerDetail, fetchCustomerDetail, addFollowUp, loading } = useStore();
+  const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+  const [followUpForm, setFollowUpForm] = useState({
+    type: 'phone' as 'phone' | 'visit' | 'other',
+    result: '',
+    notes: '',
+  });
 
   useEffect(() => {
-    if (id) loadData();
-  }, [id]);
+    if (id) fetchCustomerDetail(parseInt(id));
+  }, [id, fetchCustomerDetail]);
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const result = await customersApi.get(parseInt(id!));
-      setData(result);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading || !data) {
+  if (loading || !customerDetail) {
     return (
       <div className="card p-16 text-center text-slate-400">
         <div className="animate-pulse">加载中...</div>
@@ -41,7 +51,7 @@ export default function CustomerDetail() {
     );
   }
 
-  const { customer, records } = data;
+  const { customer, records, followUps, nextReviewDate, daysUntilReview }: CustomerDetailResponse = customerDetail;
   const activeRecords = records.filter((r) => r.status === 'active');
   const latestRecord = activeRecords[0];
 
@@ -55,6 +65,60 @@ export default function CustomerDetail() {
       右眼散光: Math.abs(r.rightCylinder),
       瞳距: r.pd,
     }));
+
+  function handleExportHistory() {
+    const exportData = records.map((r) => ({
+      id: r.id,
+      date: new Date(r.createdAt).toLocaleString('zh-CN'),
+      status: r.status === 'active' ? '有效' : '已作废',
+      leftSphere: r.leftSphere,
+      leftCylinder: r.leftCylinder,
+      leftAxis: r.leftAxis,
+      rightSphere: r.rightSphere,
+      rightCylinder: r.rightCylinder,
+      rightAxis: r.rightAxis,
+      pd: r.pd,
+      lens: r.lensName,
+      refractiveIndex: r.refractiveIndex,
+      frame: `${r.frameBrand} ${r.frameModel}`,
+      price: r.price,
+    }));
+
+    exportToCSV(
+      exportData,
+      `${customer.name}_验光历史`,
+      [
+        { key: 'id', label: '单号' },
+        { key: 'date', label: '验光时间' },
+        { key: 'status', label: '状态' },
+        { key: 'leftSphere', label: '左眼球镜' },
+        { key: 'leftCylinder', label: '左眼散光' },
+        { key: 'leftAxis', label: '左眼轴位' },
+        { key: 'rightSphere', label: '右眼球镜' },
+        { key: 'rightCylinder', label: '右眼散光' },
+        { key: 'rightAxis', label: '右眼轴位' },
+        { key: 'pd', label: '瞳距' },
+        { key: 'refractiveIndex', label: '折射率' },
+        { key: 'lens', label: '镜片' },
+        { key: 'frame', label: '镜架' },
+        { key: 'price', label: '金额' },
+      ]
+    );
+  }
+
+  async function handleAddFollowUp() {
+    if (!followUpForm.result.trim()) {
+      alert('请填写回访结果');
+      return;
+    }
+    try {
+      await addFollowUp(parseInt(id!), followUpForm);
+      setShowFollowUpModal(false);
+      setFollowUpForm({ type: 'phone', result: '', notes: '' });
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -84,12 +148,69 @@ export default function CustomerDetail() {
               </div>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-3xl font-bold font-serif text-primary-700">{activeRecords.length}</p>
-            <p className="text-sm text-slate-500">有效验光次数</p>
+          <div className="text-right flex items-center gap-4">
+            <div>
+              <p className="text-3xl font-bold font-serif text-primary-700">{activeRecords.length}</p>
+              <p className="text-sm text-slate-500">有效验光次数</p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setShowFollowUpModal(true)}
+                className="btn-outline !py-2 !px-3 text-sm flex items-center gap-1"
+              >
+                <PhoneCall className="w-4 h-4" />
+                记录回访
+              </button>
+              <button
+                onClick={handleExportHistory}
+                className="btn-outline !py-2 !px-3 text-sm flex items-center gap-1"
+              >
+                <Download className="w-4 h-4" />
+                导出记录
+              </button>
+            </div>
           </div>
         </div>
       </div>
+
+      {nextReviewDate && (
+        <div className={`card p-5 border-2 ${
+          (daysUntilReview ?? 0) <= 0
+            ? 'border-red-200 bg-red-50/50'
+            : (daysUntilReview ?? 0) <= 30
+            ? 'border-amber-200 bg-amber-50/50'
+            : 'border-emerald-200 bg-emerald-50/50'
+        }`}>
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+              (daysUntilReview ?? 0) <= 0 ? 'bg-red-100' : (daysUntilReview ?? 0) <= 30 ? 'bg-amber-100' : 'bg-emerald-100'
+            }`}>
+              {(daysUntilReview ?? 0) <= 0 ? (
+                <AlertTriangle className="w-6 h-6 text-red-600" />
+              ) : (daysUntilReview ?? 0) <= 30 ? (
+                <Clock className="w-6 h-6 text-amber-600" />
+              ) : (
+                <CheckCircle className="w-6 h-6 text-emerald-600" />
+              )}
+            </div>
+            <div className="flex-1">
+              <p className="font-semibold text-slate-800">复查提醒</p>
+              <p className="text-sm text-slate-600">
+                建议下次复查日期：{nextReviewDate}
+                {(daysUntilReview ?? 0) <= 0 && (
+                  <span className="ml-2 text-red-600 font-medium">（已逾期 {Math.abs(daysUntilReview ?? 0)} 天）</span>
+                )}
+                {(daysUntilReview ?? 0) > 0 && (daysUntilReview ?? 0) <= 30 && (
+                  <span className="ml-2 text-amber-600 font-medium">（还有 {daysUntilReview} 天）</span>
+                )}
+                {(daysUntilReview ?? 0) > 30 && (
+                  <span className="ml-2 text-emerald-600 font-medium">（还有 {daysUntilReview} 天）</span>
+                )}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {latestRecord && (
         <div className="card p-6 border-2 border-primary-200 bg-gradient-to-r from-primary-50/50 to-white">
@@ -285,6 +406,101 @@ export default function CustomerDetail() {
           </div>
         )}
       </div>
+
+      <div className="card p-6">
+        <h3 className="font-serif text-lg font-semibold text-slate-800 mb-5 flex items-center gap-2">
+          <MessageCircle className="w-5 h-5 text-primary-600" />
+          回访记录
+        </h3>
+
+        {followUps.length === 0 ? (
+          <div className="py-12 text-center text-slate-400">暂无回访记录</div>
+        ) : (
+          <div className="space-y-3">
+            {followUps.map((fu) => (
+              <div key={fu.id} className="border border-slate-100 rounded-xl p-4 bg-slate-50/30">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className={`px-2 py-1 rounded text-xs font-medium ${
+                      fu.type === 'phone' ? 'bg-blue-100 text-blue-700' :
+                      fu.type === 'visit' ? 'bg-emerald-100 text-emerald-700' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>
+                      {fu.type === 'phone' ? '电话回访' : fu.type === 'visit' ? '到店回访' : '其他'}
+                    </span>
+                    <span className="text-sm text-slate-600">{fu.result}</span>
+                  </div>
+                  <span className="text-xs text-slate-400">
+                    {new Date(fu.createdAt).toLocaleString('zh-CN')}
+                  </span>
+                </div>
+                {fu.notes && (
+                  <p className="mt-2 text-sm text-slate-600 bg-white rounded-lg p-3 border border-slate-100">
+                    {fu.notes}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showFollowUpModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="card p-6 w-full max-w-md">
+            <h3 className="font-serif text-lg font-semibold text-slate-800 mb-5">记录回访</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="label">回访类型</label>
+                <select
+                  value={followUpForm.type}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, type: e.target.value as any })}
+                  className="input-field"
+                >
+                  <option value="phone">电话回访</option>
+                  <option value="visit">到店回访</option>
+                  <option value="other">其他</option>
+                </select>
+              </div>
+              <div>
+                <label className="label">回访结果</label>
+                <input
+                  type="text"
+                  value={followUpForm.result}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, result: e.target.value })}
+                  className="input-field"
+                  placeholder="例如：已约复查、无人接听、已配镜等"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="label">备注</label>
+                <textarea
+                  value={followUpForm.notes}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, notes: e.target.value })}
+                  className="input-field min-h-[80px]"
+                  placeholder="详细记录回访内容..."
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => {
+                    setShowFollowUpModal(false);
+                    setFollowUpForm({ type: 'phone', result: '', notes: '' });
+                  }}
+                  className="flex-1 btn-outline"
+                >
+                  取消
+                </button>
+                <button onClick={handleAddFollowUp} className="flex-1 btn-primary">
+                  保存记录
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

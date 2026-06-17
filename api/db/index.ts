@@ -68,7 +68,7 @@ export function initDatabase() {
       item_type TEXT NOT NULL CHECK(item_type IN ('lens', 'frame')),
       item_id INTEGER NOT NULL,
       item_name TEXT NOT NULL,
-      change_type TEXT NOT NULL CHECK(change_type IN ('sale', 'restock', 'void_return')),
+      change_type TEXT NOT NULL CHECK(change_type IN ('sale', 'restock', 'void_return', 'exchange_return', 'exchange_sale', 'purchase_restock')),
       quantity INTEGER NOT NULL,
       stock_before INTEGER NOT NULL,
       stock_after INTEGER NOT NULL,
@@ -76,11 +76,44 @@ export function initDatabase() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS follow_up_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      customer_id INTEGER NOT NULL,
+      type TEXT NOT NULL CHECK(type IN ('phone', 'visit', 'other')),
+      result TEXT NOT NULL,
+      notes TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed')),
+      total_amount REAL NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      completed_at DATETIME
+    );
+
+    CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      purchase_order_id INTEGER NOT NULL,
+      item_type TEXT NOT NULL CHECK(item_type IN ('lens', 'frame')),
+      item_id INTEGER NOT NULL,
+      item_name TEXT NOT NULL,
+      quantity INTEGER NOT NULL,
+      cost_price REAL NOT NULL DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (purchase_order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone);
     CREATE INDEX IF NOT EXISTS idx_records_customer ON optometry_records(customer_id);
     CREATE INDEX IF NOT EXISTS idx_records_created ON optometry_records(created_at);
     CREATE INDEX IF NOT EXISTS idx_transactions_item ON inventory_transactions(item_type, item_id);
     CREATE INDEX IF NOT EXISTS idx_transactions_created ON inventory_transactions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_followups_customer ON follow_up_records(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_po_items_order ON purchase_order_items(purchase_order_id);
   `);
 
   try {
