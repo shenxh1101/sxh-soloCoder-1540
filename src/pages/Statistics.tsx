@@ -109,17 +109,20 @@ export default function Statistics() {
       purchase_restock: '采购入库',
     };
 
-    const exportData = transactions.map((tx) => ({
-      id: tx.id,
-      date: new Date(tx.createdAt).toLocaleString('zh-CN'),
-      itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
-      itemName: tx.itemName,
-      changeType: changeTypeLabel[tx.changeType] || tx.changeType,
-      quantity: tx.quantity,
-      stockBefore: tx.stockBefore,
-      stockAfter: tx.stockAfter,
-      relatedId: tx.relatedId || '-',
-    }));
+    const exportData = transactions.map((tx) => {
+      const qtySign = (tx.changeType === 'sale' || tx.changeType === 'exchange_sale') ? '-' : '+';
+      return {
+        id: tx.id,
+        date: new Date(tx.createdAt).toLocaleString('zh-CN'),
+        itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
+        itemName: tx.itemName,
+        changeType: changeTypeLabel[tx.changeType] || tx.changeType,
+        quantity: `${qtySign}${Math.abs(tx.quantity)}`,
+        stockBefore: tx.stockBefore,
+        stockAfter: tx.stockAfter,
+        relatedId: tx.relatedId || '-',
+      };
+    });
 
     exportToCSV(
       exportData,
@@ -147,32 +150,114 @@ export default function Statistics() {
       exchange_sale: '换货出库',
       purchase_restock: '采购入库',
     };
+    const paymentLabel: Record<string, string> = {
+      unpaid: '未付款',
+      partial: '部分付款',
+      paid: '已付清',
+    };
+    const statusLabel: Record<string, string> = {
+      pending: '待入库',
+      completed: '已完成',
+    };
 
-    const exportData = transactions.map((tx) => ({
-      id: tx.id,
-      date: new Date(tx.createdAt).toLocaleString('zh-CN'),
-      source: changeTypeLabel[tx.changeType] || tx.changeType,
-      itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
-      itemName: tx.itemName,
-      quantity: tx.quantity,
-      stockBefore: tx.stockBefore,
-      stockAfter: tx.stockAfter,
-      relatedId: tx.relatedId || '-',
-    }));
+    const poMap: Record<number, any> = {};
+    (reconciliation?.purchaseOrders || []).forEach((po: any) => {
+      poMap[po.id] = po;
+    });
+
+    const exportData: any[] = [];
+
+    exportData.push({ type: '=== 库存流水明细 ===' });
+    exportData.push({
+      type: '',
+      id: '流水号',
+      date: '时间',
+      source: '来源',
+      itemType: '商品类型',
+      itemName: '商品名称',
+      quantity: '数量',
+      stockBefore: '变动前库存',
+      stockAfter: '变动后库存',
+      relatedId: '关联单号',
+      purchaseNo: '采购单号',
+      supplier: '供应商',
+      paymentStatus: '付款状态',
+    });
+    transactions.forEach((tx) => {
+      let po: any = null;
+      if (tx.changeType === 'purchase_restock' && tx.relatedId) {
+        po = poMap[parseInt(String(tx.relatedId))] || null;
+      }
+      let qty = tx.quantity;
+      if (tx.changeType !== 'sale' && tx.changeType !== 'exchange_sale') {
+        qty = Math.abs(qty);
+      }
+      exportData.push({
+        type: '',
+        id: tx.id,
+        date: new Date(tx.createdAt).toLocaleString('zh-CN'),
+        source: changeTypeLabel[tx.changeType] || tx.changeType,
+        itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
+        itemName: tx.itemName,
+        quantity: qty,
+        stockBefore: tx.stockBefore,
+        stockAfter: tx.stockAfter,
+        relatedId: tx.relatedId || '-',
+        purchaseNo: po ? `#${po.id}` : '',
+        supplier: po?.supplierName || '',
+        paymentStatus: po ? (paymentLabel[po.paymentStatus] || po.paymentStatus) : '',
+      });
+    });
+
+    exportData.push({ type: '' });
+    exportData.push({ type: '=== 采购单明细 ===' });
+    exportData.push({
+      type: '',
+      purchaseNo: '采购单号',
+      supplier: '供应商',
+      orderDate: '订货日期',
+      status: '状态',
+      paymentStatus: '付款状态',
+      totalAmount: '应付金额',
+      paidAmount: '已付金额',
+      unpaidAmount: '未付金额',
+    });
+    (reconciliation?.purchaseOrders || []).forEach((po: any) => {
+      exportData.push({
+        type: '',
+        purchaseNo: `#${po.id}`,
+        supplier: po.supplierName || '-',
+        orderDate: po.orderDate ? new Date(po.orderDate).toLocaleDateString('zh-CN') : '-',
+        status: statusLabel[po.status] || po.status,
+        paymentStatus: paymentLabel[po.paymentStatus] || po.paymentStatus,
+        totalAmount: po.totalAmount,
+        paidAmount: po.paidAmount,
+        unpaidAmount: po.unpaidAmount,
+      });
+    });
 
     exportToCSV(
       exportData,
       `${year}年${month}月月度对账`,
       [
-        { key: 'id', label: '流水号' },
-        { key: 'date', label: '时间' },
-        { key: 'source', label: '来源' },
-        { key: 'itemType', label: '商品类型' },
-        { key: 'itemName', label: '商品名称' },
-        { key: 'quantity', label: '数量' },
-        { key: 'stockBefore', label: '变动前库存' },
-        { key: 'stockAfter', label: '变动后库存' },
-        { key: 'relatedId', label: '关联单号' },
+        { key: 'type', label: '' },
+        { key: 'id', label: '' },
+        { key: 'date', label: '' },
+        { key: 'source', label: '' },
+        { key: 'itemType', label: '' },
+        { key: 'itemName', label: '' },
+        { key: 'quantity', label: '' },
+        { key: 'stockBefore', label: '' },
+        { key: 'stockAfter', label: '' },
+        { key: 'relatedId', label: '' },
+        { key: 'purchaseNo', label: '' },
+        { key: 'supplier', label: '' },
+        { key: 'paymentStatus', label: '' },
+        { key: 'orderDate', label: '' },
+        { key: 'status', label: '' },
+        { key: 'totalAmount', label: '' },
+        { key: 'paidAmount', label: '' },
+        { key: 'unpaidAmount', label: '' },
       ]
     );
   };
@@ -572,11 +657,25 @@ export default function Statistics() {
                     （¥{(reconciliation?.purchases?.completedAmount || 0).toLocaleString()}）
                   </span>
                 </div>
-                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
-                  <span className="text-slate-600">未付款金额</span>
-                  <span className="font-semibold text-rose-600">
-                    ¥{(reconciliation?.purchases?.unpaidAmount || 0).toLocaleString()}
-                  </span>
+                <div className="pt-3 border-t border-slate-100 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600">本月采购应付总额</span>
+                    <span className="font-semibold text-slate-800">
+                      ¥{(reconciliation?.purchases?.totalPayable || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600">本月已付金额</span>
+                    <span className="font-semibold text-emerald-600">
+                      ¥{(reconciliation?.purchases?.totalPaid || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-600 font-medium">剩余未付</span>
+                    <span className="font-semibold text-rose-600 text-lg">
+                      ¥{(reconciliation?.purchases?.totalUnpaid || 0).toLocaleString()}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -646,7 +745,7 @@ export default function Statistics() {
                           </td>
                           <td className="px-5 py-3 text-right text-sm font-medium text-slate-700">
                             {tx.changeType === 'sale' || tx.changeType === 'exchange_sale' ? '-' : '+'}
-                            {tx.quantity}
+                            {Math.abs(tx.quantity)}
                           </td>
                           <td className="px-5 py-3 text-right text-sm text-slate-600">
                             {tx.stockAfter}
@@ -654,6 +753,65 @@ export default function Statistics() {
                           <td className="px-5 py-3 text-sm text-slate-500 font-mono">
                             {tx.relatedId || '-'}
                           </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card p-6">
+            <h3 className="font-serif text-lg font-semibold text-slate-800 mb-4">
+              本月采购单明细
+            </h3>
+            {!reconciliation?.purchaseOrders || reconciliation.purchaseOrders.length === 0 ? (
+              <div className="py-16 text-center text-slate-400">暂无采购单</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="text-left text-sm text-slate-500">
+                      <th className="px-5 py-3 font-medium">采购单号</th>
+                      <th className="px-5 py-3 font-medium">供应商</th>
+                      <th className="px-5 py-3 font-medium">订货日期</th>
+                      <th className="px-5 py-3 font-medium">状态</th>
+                      <th className="px-5 py-3 font-medium">付款状态</th>
+                      <th className="px-5 py-3 font-medium text-right">应付</th>
+                      <th className="px-5 py-3 font-medium text-right">已付</th>
+                      <th className="px-5 py-3 font-medium text-right">未付</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reconciliation.purchaseOrders.map((po: any) => {
+                      const statusLabels: Record<string, { text: string; color: string }> = {
+                        pending: { text: '待入库', color: 'bg-amber-100 text-amber-700' },
+                        completed: { text: '已完成', color: 'bg-emerald-100 text-emerald-700' },
+                      };
+                      const paymentLabels: Record<string, { text: string; color: string }> = {
+                        unpaid: { text: '未付款', color: 'bg-rose-100 text-rose-700' },
+                        partial: { text: '部分付款', color: 'bg-amber-100 text-amber-700' },
+                        paid: { text: '已付清', color: 'bg-emerald-100 text-emerald-700' },
+                      };
+                      const s = statusLabels[po.status] || { text: po.status, color: 'bg-slate-100 text-slate-700' };
+                      const p = paymentLabels[po.paymentStatus] || { text: po.paymentStatus, color: 'bg-slate-100 text-slate-700' };
+                      return (
+                        <tr key={po.id} className="border-t border-slate-50 hover:bg-slate-50">
+                          <td className="px-5 py-3 text-sm font-mono text-slate-700">#{po.id}</td>
+                          <td className="px-5 py-3 text-sm text-slate-700">{po.supplierName || '-'}</td>
+                          <td className="px-5 py-3 text-sm text-slate-600">
+                            {po.orderDate ? new Date(po.orderDate).toLocaleDateString('zh-CN') : '-'}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${s.color}`}>{s.text}</span>
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`text-xs px-2 py-0.5 rounded font-medium ${p.color}`}>{p.text}</span>
+                          </td>
+                          <td className="px-5 py-3 text-right text-sm text-slate-700">¥{po.totalAmount.toLocaleString()}</td>
+                          <td className="px-5 py-3 text-right text-sm text-emerald-600">¥{po.paidAmount.toLocaleString()}</td>
+                          <td className="px-5 py-3 text-right text-sm font-semibold text-rose-600">¥{po.unpaidAmount.toLocaleString()}</td>
                         </tr>
                       );
                     })}

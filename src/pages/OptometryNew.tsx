@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, User, Eye, Package, CheckCircle } from 'lucide-react';
 import { useStore } from '../store';
 import { customersApi } from '../utils/api';
@@ -37,23 +37,46 @@ const initialState: FormState = {
 
 export default function OptometryNew() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const customerIdFromUrl = searchParams.get('customerId');
   const { lenses, frames, fetchInventory, createOptometry } = useStore();
   const [form, setForm] = useState<FormState>(initialState);
   const [existingRecords, setExistingRecords] = useState<OptometryRecord[]>([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [resolvedCustomerId, setResolvedCustomerId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchInventory();
   }, [fetchInventory]);
 
   useEffect(() => {
-    if (form.customerPhone.length >= 11) {
+    if (customerIdFromUrl) {
+      const loadCustomer = async () => {
+        try {
+          const detail = await customersApi.get(parseInt(customerIdFromUrl));
+          setForm((prev) => ({
+            ...prev,
+            customerName: detail.customer.name,
+            customerPhone: detail.customer.phone,
+          }));
+          setResolvedCustomerId(parseInt(customerIdFromUrl));
+          setExistingRecords(detail.records);
+        } catch {
+          // ignore
+        }
+      };
+      loadCustomer();
+    }
+  }, [customerIdFromUrl]);
+
+  useEffect(() => {
+    if (form.customerPhone.length >= 11 && !customerIdFromUrl) {
       checkExistingCustomer();
-    } else {
+    } else if (!form.customerPhone) {
       setExistingRecords([]);
     }
-  }, [form.customerPhone]);
+  }, [form.customerPhone, customerIdFromUrl]);
 
   const checkExistingCustomer = async () => {
     try {
@@ -115,7 +138,13 @@ export default function OptometryNew() {
         frameId: parseInt(form.frameId),
         price: form.price ? parseFloat(form.price) : autoPrice,
       });
-      navigate('/optometry');
+      if (resolvedCustomerId) {
+        navigate(`/customers/${resolvedCustomerId}`);
+      } else if (customerIdFromUrl) {
+        navigate(`/customers/${customerIdFromUrl}`);
+      } else {
+        navigate('/optometry');
+      }
     } catch (e: any) {
       setError(e.message);
     } finally {

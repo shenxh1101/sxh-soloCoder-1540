@@ -33,6 +33,7 @@ interface AppState {
   transactions: InventoryTransaction[];
   purchaseOrders: PurchaseOrder[];
   reviewTodo: any[];
+  reviewConversion: any | null;
   reconciliation: any | null;
   loading: boolean;
   error: string | null;
@@ -50,6 +51,7 @@ interface AppState {
   fetchTransactions: (itemType?: string, year?: string, month?: string) => Promise<void>;
   fetchPurchaseOrders: (status?: string, paymentStatus?: string) => Promise<void>;
   fetchReviewTodo: () => Promise<void>;
+  fetchReviewConversion: (year?: string, month?: string) => Promise<void>;
 
   createOptometry: (data: any) => Promise<number>;
   updateOptometry: (id: number, data: Partial<OptometryRecord>) => Promise<void>;
@@ -62,7 +64,7 @@ interface AppState {
     supplierId?: number;
     orderDate?: string;
   }) => Promise<PurchaseOrder>;
-  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder>) => Promise<PurchaseOrder>;
+  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder> & { clearSupplier?: boolean }) => Promise<PurchaseOrder>;
   completePurchaseOrder: (id: number) => Promise<void>;
 }
 
@@ -79,6 +81,7 @@ export const useStore = create<AppState>((set, get) => ({
   transactions: [],
   purchaseOrders: [],
   reviewTodo: [],
+  reviewConversion: null as any,
   reconciliation: null,
   loading: false,
   error: null,
@@ -168,6 +171,15 @@ export const useStore = create<AppState>((set, get) => ({
     try {
       const data = await customersApi.getReviewTodo();
       set({ reviewTodo: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  fetchReviewConversion: async (year, month) => {
+    try {
+      const data = await customersApi.getReviewConversion(year, month);
+      set({ reviewConversion: data });
     } catch (e: any) {
       set({ error: e.message });
     }

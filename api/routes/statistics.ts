@@ -104,10 +104,33 @@ router.get('/reconciliation', (req: Request, res: Response) => {
       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_count,
       SUM(CASE WHEN status = 'pending' THEN total_amount ELSE 0 END) as pending_amount,
       SUM(CASE WHEN status = 'completed' THEN total_amount ELSE 0 END) as completed_amount,
-      SUM(CASE WHEN payment_status = 'unpaid' THEN total_amount ELSE 0 END) as unpaid_amount
+      SUM(CASE WHEN payment_status = 'unpaid' THEN total_amount ELSE 0 END) as unpaid_amount,
+      SUM(total_amount) as total_payable,
+      SUM(COALESCE(paid_amount, 0)) as total_paid
     FROM purchase_orders
     WHERE strftime('%Y-%m', order_date) = ?
   `).get(yearMonth) as any;
+
+  const purchaseList = db.prepare(`
+    SELECT po.*, s.name as supplier_name
+    FROM purchase_orders po
+    LEFT JOIN suppliers s ON po.supplier_id = s.id
+    WHERE strftime('%Y-%m', order_date) = ?
+    ORDER BY order_date DESC, created_at DESC
+  `).all(yearMonth) as any[];
+
+  const purchaseOrders = purchaseList.map((po: any) => ({
+    id: po.id,
+    status: po.status,
+    supplierId: po.supplier_id,
+    supplierName: po.supplier_name,
+    orderDate: po.order_date,
+    totalAmount: po.total_amount,
+    paymentStatus: po.payment_status,
+    paidAmount: po.paid_amount || 0,
+    unpaidAmount: Math.max(0, (po.total_amount || 0) - (po.paid_amount || 0)),
+    completedAt: po.completed_at,
+  }));
 
   res.json({
     year,
@@ -127,7 +150,11 @@ router.get('/reconciliation', (req: Request, res: Response) => {
       pendingAmount: purchaseRow.pending_amount || 0,
       completedAmount: purchaseRow.completed_amount || 0,
       unpaidAmount: purchaseRow.unpaid_amount || 0,
+      totalPayable: purchaseRow.total_payable || 0,
+      totalPaid: purchaseRow.total_paid || 0,
+      totalUnpaid: Math.max(0, (purchaseRow.total_payable || 0) - (purchaseRow.total_paid || 0)),
     },
+    purchaseOrders,
   });
 });
 

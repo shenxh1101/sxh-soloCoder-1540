@@ -133,6 +133,104 @@ router.get('/review-todo', (_req: Request, res: Response) => {
   res.json(customers);
 });
 
+router.get('/review-conversion', (req: Request, res: Response) => {
+  const now = new Date();
+  const year = (req.query.year as string) || now.getFullYear().toString();
+  const month = (req.query.month as string) || (now.getMonth() + 1).toString();
+  const monthStr = month.padStart(2, '0');
+  const yearMonth = `${year}-${monthStr}`;
+
+  const monthStart = new Date(`${yearMonth}-01T00:00:00.000Z`);
+  const nextMonth = new Date(monthStart);
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+
+  const sixMonthsAgoStart = new Date(monthStart);
+  sixMonthsAgoStart.setMonth(sixMonthsAgoStart.getMonth() - 6);
+  const sixMonthsAgoEnd = new Date(nextMonth);
+  sixMonthsAgoEnd.setMonth(sixMonthsAgoEnd.getMonth() - 6);
+
+  const customerRows = db.prepare(`
+    SELECT DISTINCT c.id, c.name, c.phone,
+           (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') as last_visit
+    FROM customers c
+    INNER JOIN optometry_records o ON o.customer_id = c.id
+    WHERE o.status = 'active'
+      AND o.created_at >= ?
+      AND o.created_at < ?
+    ORDER BY c.name
+  `).all(sixMonthsAgoStart.toISOString(), sixMonthsAgoEnd.toISOString()) as any[];
+
+  const results: any[] = [];
+  for (const row of customerRows) {
+    const lastVisit = row.last_visit ? new Date(row.last_visit) : null;
+    const nextReview = lastVisit ? new Date(lastVisit.getTime() + 182 * 24 * 60 * 60 * 1000) : null;
+    const nextReviewYM = nextReview ? nextReview.toISOString().slice(0, 7) : '';
+
+    if (nextReviewYM !== yearMonth) continue;
+
+    const followUps = db.prepare(`
+      SELECT * FROM customer_follow_ups
+      WHERE customer_id = ?
+      ORDER BY created_at DESC
+    `).all(row.id) as any[];
+
+    const hasFollowUpInWindow = followUps.some((fu: any) => {
+      const fuDate = new Date(fu.created_at);
+      return fuDate >= monthStart && fuDate < nextMonth;
+    });
+
+    const revisitRecord = db.prepare(`
+      SELECT id FROM optometry_records
+      WHERE customer_id = ? AND status = 'active' AND created_at >= ?
+      LIMIT 1
+    `).get(row.id, monthStart.toISOString());
+
+    let status: 'pending' | 'followed_up' | 'revisited' | 'not_visited';
+    if (revisitRecord) {
+      status = 'revisited';
+    } else if (hasFollowUpInWindow) {
+      status = 'followed_up';
+    } else if (nextReview && nextReview < now) {
+      status = 'not_visited';
+    } else {
+      status = 'pending';
+    }
+
+    results.push({
+      customerId: row.id,
+      name: row.name,
+      phone: row.phone,
+      lastVisit: row.last_visit,
+      nextReviewDate: nextReview ? nextReview.toISOString().slice(0, 10) : null,
+      status,
+    });
+  }
+
+  const pending = results.filter((r) => r.status === 'pending');
+  const followedUp = results.filter((r) => r.status === 'followed_up');
+  const revisited = results.filter((r) => r.status === 'revisited');
+  const notVisited = results.filter((r) => r.status === 'not_visited');
+
+  res.json({
+    year,
+    month,
+    summary: {
+      total: results.length,
+      pending: pending.length,
+      followedUp: followedUp.length,
+      revisited: revisited.length,
+      notVisited: notVisited.length,
+    },
+    customers: results,
+    byStatus: {
+      pending,
+      followedUp,
+      revisited,
+      notVisited,
+    },
+  });
+});
+
 router.get('/:id', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const customerRow = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as any;

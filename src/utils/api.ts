@@ -58,6 +58,12 @@ export const customersApi = {
     })[]>(
       '/customers/review-todo'
     ),
+  getReviewConversion: (year?: string, month?: string) => {
+    const params = new URLSearchParams();
+    if (year) params.set('year', year);
+    if (month) params.set('month', month);
+    return request<any>(`/customers/review-conversion${params.toString() ? `?${params.toString()}` : ''}`);
+  },
   create: (name: string, phone: string) =>
     request<Customer & { isNew?: boolean }>('/customers', {
       method: 'POST',
@@ -166,7 +172,7 @@ export const inventoryApi = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder>) =>
+  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder> & { clearSupplier?: boolean }) =>
     request<PurchaseOrder>(`/inventory/purchase-orders/${id}`, {
       method: 'PUT',
       body: JSON.stringify(data),

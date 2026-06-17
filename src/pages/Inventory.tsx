@@ -208,6 +208,7 @@ export default function Inventory() {
     try {
       await updatePurchaseOrder(editPO, {
         supplierId: poForm.supplierId ? parseInt(poForm.supplierId) : undefined,
+        clearSupplier: poForm.supplierId === '' ? true : undefined,
         orderDate: poForm.orderDate || undefined,
         paymentStatus: poForm.paymentStatus as 'unpaid' | 'partial' | 'paid',
         paidAmount: poForm.paidAmount ? parseFloat(poForm.paidAmount) : 0,
@@ -219,17 +220,20 @@ export default function Inventory() {
   };
 
   const handleExportTransactions = () => {
-    const exportData = transactions.map((tx) => ({
-      id: tx.id,
-      date: new Date(tx.createdAt).toLocaleString('zh-CN'),
-      itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
-      itemName: tx.itemName,
-      changeType: changeTypeLabel[tx.changeType]?.text || tx.changeType,
-      quantity: tx.quantity,
-      stockBefore: tx.stockBefore,
-      stockAfter: tx.stockAfter,
-      relatedId: tx.relatedId || '-',
-    }));
+    const exportData = transactions.map((tx) => {
+      const qtySign = (tx.changeType === 'sale' || tx.changeType === 'exchange_sale') ? '-' : '+';
+      return {
+        id: tx.id,
+        date: new Date(tx.createdAt).toLocaleString('zh-CN'),
+        itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
+        itemName: tx.itemName,
+        changeType: changeTypeLabel[tx.changeType]?.text || tx.changeType,
+        quantity: `${qtySign}${Math.abs(tx.quantity)}`,
+        stockBefore: tx.stockBefore,
+        stockAfter: tx.stockAfter,
+        relatedId: tx.relatedId || '-',
+      };
+    });
 
     exportToCSV(
       exportData,
@@ -694,8 +698,9 @@ export default function Inventory() {
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${ct.color}`}>{ct.text}</span>
                         </td>
                         <td className="px-5 py-3 text-sm font-semibold">
-                          <span className={tx.quantity > 0 ? 'text-emerald-600' : 'text-red-600'}>
-                            {tx.quantity > 0 ? `+${tx.quantity}` : tx.quantity}
+                          <span className={tx.changeType === 'sale' || tx.changeType === 'exchange_sale' ? 'text-red-600' : 'text-emerald-600'}>
+                            {tx.changeType === 'sale' || tx.changeType === 'exchange_sale' ? '-' : '+'}
+                            {Math.abs(tx.quantity)}
                           </span>
                         </td>
                         <td className="px-5 py-3 text-sm text-slate-600">

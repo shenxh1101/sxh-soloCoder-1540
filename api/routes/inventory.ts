@@ -478,28 +478,44 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
 
 router.put('/purchase-orders/:id', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
-  const { supplierId, orderDate, paymentStatus, paidAmount } = req.body;
+  const { supplierId, orderDate, paymentStatus, paidAmount, clearSupplier } = req.body;
 
-  const existing = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id);
+  const existing = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id) as any;
   if (!existing) {
     res.status(404).json({ error: '采购单不存在' });
     return;
   }
 
+  let finalSupplierId: any = existing.supplier_id;
+  if (clearSupplier === true) {
+    finalSupplierId = null;
+  } else if (supplierId !== undefined && supplierId !== null) {
+    finalSupplierId = supplierId;
+  }
+
+  let finalOrderDate = existing.order_date;
+  if (orderDate !== undefined && orderDate !== null) {
+    finalOrderDate = orderDate;
+  }
+
+  let finalPaymentStatus = existing.payment_status;
+  if (paymentStatus !== undefined && paymentStatus !== null) {
+    finalPaymentStatus = paymentStatus;
+  }
+
+  let finalPaidAmount = existing.paid_amount;
+  if (paidAmount !== undefined && paidAmount !== null) {
+    finalPaidAmount = paidAmount;
+  }
+
   db.prepare(`
     UPDATE purchase_orders 
-    SET supplier_id = COALESCE(?, supplier_id),
-        order_date = COALESCE(?, order_date),
-        payment_status = COALESCE(?, payment_status),
-        paid_amount = COALESCE(?, paid_amount)
+    SET supplier_id = ?,
+        order_date = ?,
+        payment_status = ?,
+        paid_amount = ?
     WHERE id = ?
-  `).run(
-    supplierId !== undefined ? supplierId : null,
-    orderDate,
-    paymentStatus,
-    paidAmount,
-    id
-  );
+  `).run(finalSupplierId, finalOrderDate, finalPaymentStatus, finalPaidAmount, id);
 
   const orderRow = db.prepare(`
     SELECT po.*, s.name as supplier_name
