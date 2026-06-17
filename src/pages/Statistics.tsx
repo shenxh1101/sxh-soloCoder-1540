@@ -9,25 +9,42 @@ import {
   ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { Eye, TrendingUp, DollarSign, Award, Download } from 'lucide-react';
+import { Eye, TrendingUp, DollarSign, Award, Download, ShoppingCart, RefreshCw, Package, ArrowUpDown } from 'lucide-react';
 import { useStore } from '../store';
 import { exportToCSV } from '../utils/export';
 
 const BAR_COLORS = ['#1e40af', '#d97706', '#059669'];
 
+type TabType = 'sales' | 'reconciliation';
+
 export default function Statistics() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth() + 1).toString());
+  const [tab, setTab] = useState<TabType>('sales');
 
-  const { monthlyStats, lensSalesStats, fetchStatistics, fetchOptometryRecords, optometryRecords, transactions, fetchTransactions } =
-    useStore();
+  const {
+    monthlyStats,
+    lensSalesStats,
+    fetchStatistics,
+    fetchOptometryRecords,
+    optometryRecords,
+    transactions,
+    fetchTransactions,
+    reconciliation,
+    fetchReconciliation,
+  } = useStore();
 
   useEffect(() => {
-    fetchStatistics(year, month);
-    fetchOptometryRecords(year, month, false);
-    fetchTransactions(undefined, year, month);
-  }, [fetchStatistics, fetchOptometryRecords, fetchTransactions, year, month]);
+    if (tab === 'sales') {
+      fetchStatistics(year, month);
+      fetchOptometryRecords(year, month, false);
+    } else {
+      fetchReconciliation(year, month);
+      fetchTransactions(undefined, year, month);
+      fetchOptometryRecords(year, month, true);
+    }
+  }, [tab, year, month, fetchStatistics, fetchOptometryRecords, fetchReconciliation, fetchTransactions]);
 
   const chartData = lensSalesStats.map((s) => ({
     name: `${s.refractiveIndex}`,
@@ -121,8 +138,70 @@ export default function Statistics() {
     );
   };
 
+  const handleExportReconciliation = () => {
+    const changeTypeLabel: Record<string, string> = {
+      sale: '销售出库',
+      restock: '手动入库',
+      void_return: '作废退回',
+      exchange_return: '换货退回',
+      exchange_sale: '换货出库',
+      purchase_restock: '采购入库',
+    };
+
+    const exportData = transactions.map((tx) => ({
+      id: tx.id,
+      date: new Date(tx.createdAt).toLocaleString('zh-CN'),
+      source: changeTypeLabel[tx.changeType] || tx.changeType,
+      itemType: tx.itemType === 'lens' ? '镜片' : '镜架',
+      itemName: tx.itemName,
+      quantity: tx.quantity,
+      stockBefore: tx.stockBefore,
+      stockAfter: tx.stockAfter,
+      relatedId: tx.relatedId || '-',
+    }));
+
+    exportToCSV(
+      exportData,
+      `${year}年${month}月月度对账`,
+      [
+        { key: 'id', label: '流水号' },
+        { key: 'date', label: '时间' },
+        { key: 'source', label: '来源' },
+        { key: 'itemType', label: '商品类型' },
+        { key: 'itemName', label: '商品名称' },
+        { key: 'quantity', label: '数量' },
+        { key: 'stockBefore', label: '变动前库存' },
+        { key: 'stockAfter', label: '变动后库存' },
+        { key: 'relatedId', label: '关联单号' },
+      ]
+    );
+  };
+
   return (
     <div className="space-y-6">
+      <div className="flex items-center gap-2 border-b border-slate-200">
+        <button
+          onClick={() => setTab('sales')}
+          className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors ${
+            tab === 'sales'
+              ? 'border-primary-600 text-primary-700'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          销售统计
+        </button>
+        <button
+          onClick={() => setTab('reconciliation')}
+          className={`px-4 py-3 font-medium text-sm border-b-2 transition-colors ${
+            tab === 'reconciliation'
+              ? 'border-primary-600 text-primary-700'
+              : 'border-transparent text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          月度对账
+        </button>
+      </div>
+
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <select value={year} onChange={(e) => setYear(e.target.value)} className="input-field w-28">
@@ -136,19 +215,28 @@ export default function Statistics() {
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-3">
-          <button onClick={handleExportSales} className="btn-outline flex items-center gap-2">
+        {tab === 'sales' ? (
+          <div className="flex items-center gap-3">
+            <button onClick={handleExportSales} className="btn-outline flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              导出销售明细
+            </button>
+            <button onClick={handleExportTransactions} className="btn-outline flex items-center gap-2">
+              <Download className="w-4 h-4" />
+              导出库存流水
+            </button>
+          </div>
+        ) : (
+          <button onClick={handleExportReconciliation} className="btn-primary flex items-center gap-2">
             <Download className="w-4 h-4" />
-            导出销售明细
+            导出对账单
           </button>
-          <button onClick={handleExportTransactions} className="btn-outline flex items-center gap-2">
-            <Download className="w-4 h-4" />
-            导出库存流水
-          </button>
-        </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {tab === 'sales' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="card p-5">
           <div className="flex items-center gap-3">
             <div className="w-11 h-11 bg-primary-100 rounded-xl flex items-center justify-center">
@@ -351,6 +439,231 @@ export default function Statistics() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {tab === 'reconciliation' && (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="card p-5">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-primary-100 rounded-xl flex items-center justify-center">
+                  <ShoppingCart className="w-5 h-5 text-primary-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">销售出库</p>
+                  <p className="text-2xl font-bold font-serif text-slate-800">
+                    {reconciliation?.sales?.count || 0}
+                    <span className="text-sm font-normal text-slate-500 ml-1">笔</span>
+                  </p>
+                  <p className="text-sm text-accent-600 font-medium">
+                    ¥{(reconciliation?.sales?.total || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-rose-100 rounded-xl flex items-center justify-center">
+                  <RefreshCw className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">作废退回</p>
+                  <p className="text-2xl font-bold font-serif text-slate-800">
+                    {reconciliation?.voided?.count || 0}
+                    <span className="text-sm font-normal text-slate-500 ml-1">笔</span>
+                  </p>
+                  <p className="text-sm text-rose-600 font-medium">
+                    ¥{(reconciliation?.voided?.total || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-amber-100 rounded-xl flex items-center justify-center">
+                  <ArrowUpDown className="w-5 h-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">换货调整</p>
+                  <p className="text-2xl font-bold font-serif text-slate-800">
+                    {(reconciliation?.inventoryTransactions?.['exchange_return']?.txCount || 0) +
+                     (reconciliation?.inventoryTransactions?.['exchange_sale']?.txCount || 0)}
+                    <span className="text-sm font-normal text-slate-500 ml-1">笔</span>
+                  </p>
+                  <p className="text-sm text-amber-600 font-medium">
+                    镜片 {(reconciliation?.inventoryTransactions?.['exchange_sale']?.lensQty || 0) -
+                            (reconciliation?.inventoryTransactions?.['exchange_return']?.lensQty || 0)} 片
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-5">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 bg-emerald-100 rounded-xl flex items-center justify-center">
+                  <Package className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <p className="text-sm text-slate-500">采购入库</p>
+                  <p className="text-2xl font-bold font-serif text-slate-800">
+                    {reconciliation?.purchases?.completedCount || 0}
+                    <span className="text-sm font-normal text-slate-500 ml-1">单</span>
+                  </p>
+                  <p className="text-sm text-emerald-600 font-medium">
+                    ¥{(reconciliation?.purchases?.completedAmount || 0).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <div className="card p-6">
+              <h3 className="font-serif text-lg font-semibold text-slate-800 mb-4">
+                库存流水汇总
+              </h3>
+              <div className="space-y-3">
+                {Object.entries(reconciliation?.inventoryTransactions || {}).map(([type, data]) => {
+                  const labels: Record<string, string> = {
+                    sale: '销售出库',
+                    restock: '手动入库',
+                    void_return: '作废退回',
+                    exchange_return: '换货退回',
+                    exchange_sale: '换货出库',
+                    purchase_restock: '采购入库',
+                  };
+                  const d = data as { txCount: number; lensQty: number; frameQty: number };
+                  return (
+                    <div key={type} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
+                      <span className="font-medium text-slate-700">{labels[type] || type}</span>
+                      <div className="flex items-center gap-4 text-sm text-slate-600">
+                        <span>{d.txCount} 笔</span>
+                        <span className="text-blue-600">镜片 {d.lensQty} 片</span>
+                        <span className="text-amber-600">镜架 {d.frameQty} 副</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {Object.keys(reconciliation?.inventoryTransactions || {}).length === 0 && (
+                  <div className="py-8 text-center text-slate-400">暂无流水数据</div>
+                )}
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <h3 className="font-serif text-lg font-semibold text-slate-800 mb-4">
+                采购对账
+              </h3>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">待处理采购单</span>
+                  <span className="font-semibold text-amber-600">
+                    {reconciliation?.purchases?.pendingCount || 0} 单
+                    （¥{(reconciliation?.purchases?.pendingAmount || 0).toLocaleString()}）
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-600">已完成采购</span>
+                  <span className="font-semibold text-emerald-600">
+                    {reconciliation?.purchases?.completedCount || 0} 单
+                    （¥{(reconciliation?.purchases?.completedAmount || 0).toLocaleString()}）
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                  <span className="text-slate-600">未付款金额</span>
+                  <span className="font-semibold text-rose-600">
+                    ¥{(reconciliation?.purchases?.unpaidAmount || 0).toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card p-6">
+            <h3 className="font-serif text-lg font-semibold text-slate-800 mb-4">
+              本月流水明细（按来源分组）
+            </h3>
+            {transactions.length === 0 ? (
+              <div className="py-16 text-center text-slate-400">暂无流水记录</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50">
+                    <tr className="text-left text-sm text-slate-500">
+                      <th className="px-5 py-3 font-medium">时间</th>
+                      <th className="px-5 py-3 font-medium">来源</th>
+                      <th className="px-5 py-3 font-medium">类型</th>
+                      <th className="px-5 py-3 font-medium">商品</th>
+                      <th className="px-5 py-3 font-medium text-right">数量</th>
+                      <th className="px-5 py-3 font-medium text-right">变动后库存</th>
+                      <th className="px-5 py-3 font-medium">关联单号</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {transactions.map((tx) => {
+                      const changeTypeLabel: Record<string, string> = {
+                        sale: '销售出库',
+                        restock: '手动入库',
+                        void_return: '作废退回',
+                        exchange_return: '换货退回',
+                        exchange_sale: '换货出库',
+                        purchase_restock: '采购入库',
+                      };
+                      const sourceColors: Record<string, string> = {
+                        sale: 'bg-blue-100 text-blue-700',
+                        restock: 'bg-slate-100 text-slate-700',
+                        void_return: 'bg-rose-100 text-rose-700',
+                        exchange_return: 'bg-amber-100 text-amber-700',
+                        exchange_sale: 'bg-amber-100 text-amber-700',
+                        purchase_restock: 'bg-emerald-100 text-emerald-700',
+                      };
+                      return (
+                        <tr
+                          key={tx.id}
+                          className="border-t border-slate-50 hover:bg-slate-50"
+                        >
+                          <td className="px-5 py-3 text-sm text-slate-600">
+                            {new Date(tx.createdAt).toLocaleString('zh-CN', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </td>
+                          <td className="px-5 py-3">
+                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${sourceColors[tx.changeType] || 'bg-slate-100 text-slate-700'}`}>
+                              {changeTypeLabel[tx.changeType] || tx.changeType}
+                            </span>
+                          </td>
+                          <td className="px-5 py-3 text-sm text-slate-600">
+                            {tx.itemType === 'lens' ? '镜片' : '镜架'}
+                          </td>
+                          <td className="px-5 py-3 text-sm text-slate-600">
+                            {tx.itemName}
+                          </td>
+                          <td className="px-5 py-3 text-right text-sm font-medium text-slate-700">
+                            {tx.changeType === 'sale' || tx.changeType === 'exchange_sale' ? '-' : '+'}
+                            {tx.quantity}
+                          </td>
+                          <td className="px-5 py-3 text-right text-sm text-slate-600">
+                            {tx.stockAfter}
+                          </td>
+                          <td className="px-5 py-3 text-sm text-slate-500 font-mono">
+                            {tx.relatedId || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

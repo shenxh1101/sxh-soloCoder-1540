@@ -10,6 +10,7 @@ import type {
   FollowUpRecord,
   PurchaseOrder,
   CustomerDetailResponse,
+  Supplier,
 } from '../../shared/types';
 
 const API_BASE = '/api';
@@ -45,6 +46,17 @@ export const customersApi = {
   getDueForReview: () =>
     request<(Customer & { lastVisit: string; nextReviewDate: string; daysUntilReview: number })[]>(
       '/customers/due-for-review'
+    ),
+  getReviewTodo: () =>
+    request<(Customer & {
+      lastVisit: string;
+      nextReviewDate: string;
+      daysUntilReview: number;
+      status: 'overdue' | 'upcoming' | 'followed_up' | 'normal';
+      lastFollowUp: string | null;
+      hasFollowUpNotVisited: boolean;
+    })[]>(
+      '/customers/review-todo'
     ),
   create: (name: string, phone: string) =>
     request<Customer & { isNew?: boolean }>('/customers', {
@@ -117,6 +129,17 @@ export const inventoryApi = {
       body: JSON.stringify(data),
     }),
   alerts: () => request<InventoryAlert[]>('/inventory/alerts'),
+  suppliers: () => request<Supplier[]>('/inventory/suppliers'),
+  createSupplier: (data: Partial<Supplier>) =>
+    request<Supplier>('/inventory/suppliers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateSupplier: (id: number, data: Partial<Supplier>) =>
+    request<Supplier>(`/inventory/suppliers/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   transactions: (itemType?: string, year?: string, month?: string) => {
     const params = new URLSearchParams();
     if (itemType) params.set('itemType', itemType);
@@ -126,12 +149,27 @@ export const inventoryApi = {
       `/inventory/transactions${params.toString() ? `?${params.toString()}` : ''}`
     );
   },
-  purchaseOrders: () =>
-    request<PurchaseOrder[]>('/inventory/purchase-orders'),
-  createPurchaseOrder: (items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[]) =>
+  purchaseOrders: (status?: string, paymentStatus?: string) => {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (paymentStatus) params.set('paymentStatus', paymentStatus);
+    return request<PurchaseOrder[]>(
+      `/inventory/purchase-orders${params.toString() ? `?${params.toString()}` : ''}`
+    );
+  },
+  createPurchaseOrder: (data: {
+    items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[];
+    supplierId?: number;
+    orderDate?: string;
+  }) =>
     request<PurchaseOrder>('/inventory/purchase-orders', {
       method: 'POST',
-      body: JSON.stringify({ items }),
+      body: JSON.stringify(data),
+    }),
+  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder>) =>
+    request<PurchaseOrder>(`/inventory/purchase-orders/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
   completePurchaseOrder: (id: number) =>
     request<{ id: number; success: boolean; message: string }>(`/inventory/purchase-orders/${id}/complete`, {
@@ -154,6 +192,14 @@ export const statisticsApi = {
     if (month) params.set('month', month);
     return request<LensSalesStat[]>(
       `/statistics/lenses${params.toString() ? `?${params.toString()}` : ''}`
+    );
+  },
+  reconciliation: (year?: string, month?: string) => {
+    const params = new URLSearchParams();
+    if (year) params.set('year', year);
+    if (month) params.set('month', month);
+    return request<any>(
+      `/statistics/reconciliation${params.toString() ? `?${params.toString()}` : ''}`
     );
   },
 };

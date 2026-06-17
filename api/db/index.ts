@@ -86,12 +86,27 @@ export function initDatabase() {
       FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS suppliers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      contact_person TEXT NOT NULL DEFAULT '',
+      phone TEXT NOT NULL DEFAULT '',
+      address TEXT NOT NULL DEFAULT '',
+      notes TEXT NOT NULL DEFAULT '',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS purchase_orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'completed')),
+      supplier_id INTEGER,
+      order_date DATE NOT NULL,
       total_amount REAL NOT NULL DEFAULT 0,
+      payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'partial', 'paid')),
+      paid_amount REAL NOT NULL DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      completed_at DATETIME
+      completed_at DATETIME,
+      FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS purchase_order_items (
@@ -112,7 +127,10 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_transactions_item ON inventory_transactions(item_type, item_id);
     CREATE INDEX IF NOT EXISTS idx_transactions_created ON inventory_transactions(created_at);
     CREATE INDEX IF NOT EXISTS idx_followups_customer ON follow_up_records(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_suppliers_name ON suppliers(name);
     CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status);
+    CREATE INDEX IF NOT EXISTS idx_po_supplier ON purchase_orders(supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_po_payment ON purchase_orders(payment_status);
     CREATE INDEX IF NOT EXISTS idx_po_items_order ON purchase_order_items(purchase_order_id);
   `);
 
@@ -123,6 +141,30 @@ export function initDatabase() {
   try {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_records_status ON optometry_records(status)`);
   } catch {}
+
+  try {
+    db.exec(`ALTER TABLE purchase_orders ADD COLUMN supplier_id INTEGER`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE purchase_orders ADD COLUMN order_date DATE DEFAULT CURRENT_DATE`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE purchase_orders ADD COLUMN payment_status TEXT NOT NULL DEFAULT 'unpaid' CHECK(payment_status IN ('unpaid', 'partial', 'paid'))`);
+  } catch {}
+  try {
+    db.exec(`ALTER TABLE purchase_orders ADD COLUMN paid_amount REAL NOT NULL DEFAULT 0`);
+  } catch {}
+
+  const supplierCount = db.prepare('SELECT COUNT(*) as count FROM suppliers').get() as { count: number };
+  if (supplierCount.count === 0) {
+    const insertSupplier = db.prepare(`
+      INSERT INTO suppliers (name, contact_person, phone, address, notes)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    insertSupplier.run('诚信光学镜片批发', '王经理', '13900139001', '上海市浦东新区眼镜城A栋3号', '主要供应1.56和1.60折射率镜片');
+    insertSupplier.run('光明镜架厂', '李总', '13800138002', '广州市越秀区眼镜批发市场B区12号', '品牌镜架，性价比高');
+    insertSupplier.run('视博医疗科技', '张工', '13700137003', '深圳市龙岗区光学产业园', '高端镜片，1.67折射率');
+  }
 
   const lensCount = db.prepare('SELECT COUNT(*) as count FROM lens_inventory').get() as { count: number };
   if (lensCount.count === 0) {

@@ -9,12 +9,16 @@ import {
   CheckCircle,
   Download,
   X,
+  Edit,
+  Building2,
+  CreditCard,
+  Calendar,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { exportToCSV } from '../utils/export';
-import type { InventoryTransaction, InventoryAlert } from '../../shared/types';
+import type { InventoryTransaction, InventoryAlert, Supplier } from '../../shared/types';
 
-type TabType = 'lenses' | 'frames' | 'transactions' | 'purchase-orders' | 'alerts';
+type TabType = 'lenses' | 'frames' | 'transactions' | 'purchase-orders' | 'alerts' | 'suppliers';
 
 export default function Inventory() {
   const {
@@ -31,6 +35,11 @@ export default function Inventory() {
     fetchPurchaseOrders,
     createPurchaseOrder,
     completePurchaseOrder,
+    updatePurchaseOrder,
+    suppliers,
+    fetchSuppliers,
+    createSupplier,
+    updateSupplier,
   } = useStore();
   const [tab, setTab] = useState<TabType>('lenses');
   const [restockModal, setRestockModal] = useState<{
@@ -46,6 +55,14 @@ export default function Inventory() {
   });
   const [selectedAlerts, setSelectedAlerts] = useState<Set<string>>(new Set());
   const [showConfirmPO, setShowConfirmPO] = useState(false);
+  const [supplierModal, setSupplierModal] = useState<Supplier | null>(null);
+  const [showSupplierModal, setShowSupplierModal] = useState(false);
+  const [supplierForm, setSupplierForm] = useState({ name: '', contactPerson: '', phone: '', address: '', notes: '' });
+  const [editPO, setEditPO] = useState<number | null>(null);
+  const [poForm, setPoForm] = useState({ supplierId: '', orderDate: '', paymentStatus: 'unpaid', paidAmount: '' });
+  const [poSupplierId, setPoSupplierId] = useState('');
+  const [poOrderDate, setPoOrderDate] = useState(new Date().toISOString().split('T')[0]);
+  const [poFilter, setPoFilter] = useState({ status: '', paymentStatus: '' });
 
   useEffect(() => {
     fetchInventory();
@@ -57,9 +74,12 @@ export default function Inventory() {
     } else if (tab === 'alerts') {
       fetchAlerts();
     } else if (tab === 'purchase-orders') {
-      fetchPurchaseOrders();
+      fetchPurchaseOrders(poFilter.status || undefined, poFilter.paymentStatus || undefined);
+      fetchSuppliers();
+    } else if (tab === 'suppliers') {
+      fetchSuppliers();
     }
-  }, [tab, txFilter, fetchTransactions, fetchAlerts, fetchPurchaseOrders]);
+  }, [tab, txFilter, poFilter, fetchTransactions, fetchAlerts, fetchPurchaseOrders, fetchSuppliers]);
 
   const handleRestock = async () => {
     if (!restockModal || !restockQty || parseInt(restockQty) <= 0) return;
@@ -124,10 +144,75 @@ export default function Inventory() {
     }
 
     try {
-      await createPurchaseOrder(items);
+      await createPurchaseOrder({
+        items,
+        supplierId: poSupplierId ? parseInt(poSupplierId) : undefined,
+        orderDate: poOrderDate,
+      });
       setSelectedAlerts(new Set());
       setShowConfirmPO(false);
       setTab('purchase-orders');
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const handleOpenSupplierModal = (supplier?: Supplier) => {
+    if (supplier) {
+      setSupplierModal(supplier);
+      setSupplierForm({
+        name: supplier.name,
+        contactPerson: supplier.contactPerson || '',
+        phone: supplier.phone || '',
+        address: supplier.address || '',
+        notes: supplier.notes || '',
+      });
+    } else {
+      setSupplierModal(null);
+      setSupplierForm({ name: '', contactPerson: '', phone: '', address: '', notes: '' });
+    }
+    setShowSupplierModal(true);
+  };
+
+  const handleSaveSupplier = async () => {
+    if (!supplierForm.name.trim()) {
+      alert('请输入供应商名称');
+      return;
+    }
+    try {
+      if (supplierModal) {
+        await updateSupplier(supplierModal.id, supplierForm);
+      } else {
+        await createSupplier(supplierForm);
+      }
+      setShowSupplierModal(false);
+      setSupplierModal(null);
+      setSupplierForm({ name: '', contactPerson: '', phone: '', address: '', notes: '' });
+    } catch (e: any) {
+      alert(e.message);
+    }
+  };
+
+  const handleOpenEditPO = (po: any) => {
+    setEditPO(po.id);
+    setPoForm({
+      supplierId: po.supplierId?.toString() || '',
+      orderDate: po.orderDate ? po.orderDate.split('T')[0] : '',
+      paymentStatus: po.paymentStatus || 'unpaid',
+      paidAmount: po.paidAmount?.toString() || '0',
+    });
+  };
+
+  const handleSavePO = async () => {
+    if (!editPO) return;
+    try {
+      await updatePurchaseOrder(editPO, {
+        supplierId: poForm.supplierId ? parseInt(poForm.supplierId) : undefined,
+        orderDate: poForm.orderDate || undefined,
+        paymentStatus: poForm.paymentStatus as 'unpaid' | 'partial' | 'paid',
+        paidAmount: poForm.paidAmount ? parseFloat(poForm.paidAmount) : 0,
+      });
+      setEditPO(null);
     } catch (e: any) {
       alert(e.message);
     }
@@ -167,7 +252,7 @@ export default function Inventory() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex bg-slate-100 rounded-xl p-1">
-          {(['lenses', 'frames', 'alerts', 'purchase-orders', 'transactions'] as TabType[]).map((t) => (
+          {(['lenses', 'frames', 'alerts', 'purchase-orders', 'suppliers', 'transactions'] as TabType[]).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -179,11 +264,13 @@ export default function Inventory() {
               {t === 'frames' && <Package className="w-4 h-4" />}
               {t === 'alerts' && <AlertTriangle className="w-4 h-4" />}
               {t === 'purchase-orders' && <ShoppingCart className="w-4 h-4" />}
+              {t === 'suppliers' && <Building2 className="w-4 h-4" />}
               {t === 'transactions' && <ArrowUpDown className="w-4 h-4" />}
               {t === 'lenses' ? '镜片库存' :
                t === 'frames' ? '镜架库存' :
                t === 'alerts' ? '补货建议' :
-               t === 'purchase-orders' ? '采购单' : '出入库流水'}
+               t === 'purchase-orders' ? '采购单' :
+               t === 'suppliers' ? '供应商' : '出入库流水'}
             </button>
           ))}
         </div>
@@ -383,6 +470,28 @@ export default function Inventory() {
 
       {tab === 'purchase-orders' && (
         <div className="space-y-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={poFilter.status}
+              onChange={(e) => setPoFilter({ ...poFilter, status: e.target.value })}
+              className="input-field w-32"
+            >
+              <option value="">全部状态</option>
+              <option value="pending">待入库</option>
+              <option value="completed">已完成</option>
+            </select>
+            <select
+              value={poFilter.paymentStatus}
+              onChange={(e) => setPoFilter({ ...poFilter, paymentStatus: e.target.value })}
+              className="input-field w-32"
+            >
+              <option value="">全部付款状态</option>
+              <option value="unpaid">未付款</option>
+              <option value="partial">部分付款</option>
+              <option value="paid">已付清</option>
+            </select>
+          </div>
+
           {purchaseOrders.length === 0 ? (
             <div className="card p-16 text-center text-slate-400">
               <ShoppingCart className="w-12 h-12 mx-auto mb-3 text-slate-300" />
@@ -405,31 +514,55 @@ export default function Inventory() {
                       )}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="font-semibold text-slate-800">采购单 #{po.id}</p>
                         <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                           po.status === 'completed' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                         }`}>
                           {po.status === 'completed' ? '已完成' : '待入库'}
                         </span>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                          po.paymentStatus === 'paid' ? 'bg-emerald-100 text-emerald-700' :
+                          po.paymentStatus === 'partial' ? 'bg-amber-100 text-amber-700' :
+                          'bg-rose-100 text-rose-700'
+                        }`}>
+                          {po.paymentStatus === 'paid' ? '已付清' :
+                           po.paymentStatus === 'partial' ? '部分付款' : '未付款'}
+                        </span>
                       </div>
-                      <p className="text-sm text-slate-500 mt-1">
-                        创建时间：{new Date(po.createdAt).toLocaleString('zh-CN')}
-                        {po.completedAt && ` · 完成时间：${new Date(po.completedAt).toLocaleString('zh-CN')}`}
-                      </p>
+                      <div className="text-sm text-slate-500 mt-1 space-y-0.5">
+                        {po.supplierName && <p>供应商：{po.supplierName}</p>}
+                        {po.orderDate && <p>订货日期：{new Date(po.orderDate).toLocaleDateString('zh-CN')}</p>}
+                        <p>
+                          创建时间：{new Date(po.createdAt).toLocaleString('zh-CN')}
+                          {po.completedAt && ` · 完成时间：${new Date(po.completedAt).toLocaleString('zh-CN')}`}
+                        </p>
+                        {(po.paymentStatus === 'partial' || po.paymentStatus === 'paid') && po.paidAmount !== undefined && (
+                          <p>已付金额：¥{po.paidAmount.toLocaleString()} / ¥{po.totalAmount.toLocaleString()}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="text-right">
                     <p className="text-xl font-bold font-serif text-primary-700">¥{po.totalAmount.toLocaleString()}</p>
                     <p className="text-sm text-slate-500">{po.items.length} 种商品</p>
-                    {po.status === 'pending' && (
+                    <div className="flex items-center gap-2 mt-2 justify-end">
                       <button
-                        onClick={() => completePurchaseOrder(po.id)}
-                        className="mt-2 btn-primary !py-1.5 !px-3 text-sm"
+                        onClick={() => handleOpenEditPO(po)}
+                        className="btn-outline !py-1.5 !px-3 text-sm flex items-center gap-1"
                       >
-                        确认入库
+                        <Edit className="w-3.5 h-3.5" />
+                        编辑
                       </button>
-                    )}
+                      {po.status === 'pending' && (
+                        <button
+                          onClick={() => completePurchaseOrder(po.id)}
+                          className="btn-primary !py-1.5 !px-3 text-sm"
+                        >
+                          确认入库
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -453,6 +586,57 @@ export default function Inventory() {
                 </div>
               </div>
             ))
+          )}
+        </div>
+      )}
+
+      {tab === 'suppliers' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-slate-500">共 {suppliers.length} 个供应商</p>
+            <button
+              onClick={() => handleOpenSupplierModal()}
+              className="btn-primary flex items-center gap-2"
+            >
+              <Plus className="w-4 h-4" />
+              新增供应商
+            </button>
+          </div>
+
+          {suppliers.length === 0 ? (
+            <div className="card p-16 text-center text-slate-400">
+              <Building2 className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+              <p>暂无供应商</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {suppliers.map((s) => (
+                <div key={s.id} className="card p-5">
+                  <div className="flex items-start justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-slate-100 rounded-xl flex items-center justify-center">
+                        <Building2 className="w-5 h-5 text-slate-600" />
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-800">{s.name}</p>
+                        {s.contactPerson && <p className="text-sm text-slate-500">联系人：{s.contactPerson}</p>}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleOpenSupplierModal(s)}
+                      className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-slate-600"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                  </div>
+                  <div className="space-y-1 text-sm text-slate-600">
+                    {s.phone && <p>📞 {s.phone}</p>}
+                    {s.address && <p>📍 {s.address}</p>}
+                    {s.notes && <p className="text-slate-500">备注：{s.notes}</p>}
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -559,7 +743,32 @@ export default function Inventory() {
               </button>
             </div>
 
-            <div className="space-y-2 max-h-64 overflow-y-auto mb-5">
+            <div className="space-y-3 mb-5">
+              <div>
+                <label className="label">供应商</label>
+                <select
+                  value={poSupplierId}
+                  onChange={(e) => setPoSupplierId(e.target.value)}
+                  className="input-field"
+                >
+                  <option value="">选择供应商（可选）</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">订货日期</label>
+                <input
+                  type="date"
+                  value={poOrderDate}
+                  onChange={(e) => setPoOrderDate(e.target.value)}
+                  className="input-field"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 max-h-56 overflow-y-auto mb-5">
               {alerts
                 .filter((a) => selectedAlerts.has(`${a.type}-${a.id}`))
                 .map((alert) => (
@@ -584,6 +793,160 @@ export default function Inventory() {
             <div className="flex gap-3">
               <button onClick={() => setShowConfirmPO(false)} className="flex-1 btn-outline">取消</button>
               <button onClick={handleCreatePO} className="flex-1 btn-primary">确认生成</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSupplierModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="card p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-serif text-lg font-semibold text-slate-800">
+                {supplierModal ? '编辑供应商' : '新增供应商'}
+              </h3>
+              <button
+                onClick={() => { setShowSupplierModal(false); setSupplierModal(null); setSupplierForm({ name: '', contactPerson: '', phone: '', address: '', notes: '' }); }}
+                className="p-1 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label">供应商名称 <span className="text-rose-500">*</span></label>
+                <input
+                  type="text"
+                  value={supplierForm.name}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, name: e.target.value })}
+                  className="input-field"
+                  placeholder="请输入供应商名称"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="label">联系人</label>
+                <input
+                  type="text"
+                  value={supplierForm.contactPerson}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, contactPerson: e.target.value })}
+                  className="input-field"
+                  placeholder="请输入联系人姓名"
+                />
+              </div>
+              <div>
+                <label className="label">联系电话</label>
+                <input
+                  type="tel"
+                  value={supplierForm.phone}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, phone: e.target.value })}
+                  className="input-field"
+                  placeholder="请输入联系电话"
+                />
+              </div>
+              <div>
+                <label className="label">地址</label>
+                <input
+                  type="text"
+                  value={supplierForm.address}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, address: e.target.value })}
+                  className="input-field"
+                  placeholder="请输入地址"
+                />
+              </div>
+              <div>
+                <label className="label">备注</label>
+                <textarea
+                  value={supplierForm.notes}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, notes: e.target.value })}
+                  className="input-field min-h-[80px]"
+                  placeholder="请输入备注"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 pt-5">
+              <button
+                onClick={() => { setShowSupplierModal(false); setSupplierModal(null); setSupplierForm({ name: '', contactPerson: '', phone: '', address: '', notes: '' }); }}
+                className="flex-1 btn-outline"
+              >
+                取消
+              </button>
+              <button onClick={handleSaveSupplier} className="flex-1 btn-primary">
+                {supplierModal ? '保存' : '新增'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editPO !== null && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="card p-6 w-full max-w-md">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-serif text-lg font-semibold text-slate-800">编辑采购单</h3>
+              <button
+                onClick={() => setEditPO(null)}
+                className="p-1 hover:bg-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5 text-slate-400" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="label">供应商</label>
+                <select
+                  value={poForm.supplierId}
+                  onChange={(e) => setPoForm({ ...poForm, supplierId: e.target.value })}
+                  className="input-field"
+                >
+                  <option value="">选择供应商（可选）</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="label">订货日期</label>
+                <input
+                  type="date"
+                  value={poForm.orderDate}
+                  onChange={(e) => setPoForm({ ...poForm, orderDate: e.target.value })}
+                  className="input-field"
+                />
+              </div>
+              <div>
+                <label className="label">付款状态</label>
+                <select
+                  value={poForm.paymentStatus}
+                  onChange={(e) => setPoForm({ ...poForm, paymentStatus: e.target.value })}
+                  className="input-field"
+                >
+                  <option value="unpaid">未付款</option>
+                  <option value="partial">部分付款</option>
+                  <option value="paid">已付清</option>
+                </select>
+              </div>
+              {(poForm.paymentStatus === 'partial' || poForm.paymentStatus === 'paid') && (
+                <div>
+                  <label className="label">已付金额（元）</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={poForm.paidAmount}
+                    onChange={(e) => setPoForm({ ...poForm, paidAmount: e.target.value })}
+                    className="input-field"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-3 pt-5">
+              <button onClick={() => setEditPO(null)} className="flex-1 btn-outline">取消</button>
+              <button onClick={handleSavePO} className="flex-1 btn-primary">保存</button>
             </div>
           </div>
         </div>

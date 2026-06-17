@@ -75,6 +75,64 @@ router.get('/due-for-review', (_req: Request, res: Response) => {
   res.json(customers);
 });
 
+router.get('/review-todo', (_req: Request, res: Response) => {
+  const today = new Date();
+  const thirtyDaysLater = new Date();
+  thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+  const sixMonthsAgo = new Date();
+  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+  const rows = db
+    .prepare(
+      `SELECT c.*,
+         (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') as last_visit,
+         (SELECT MAX(created_at) FROM follow_up_records WHERE customer_id = c.id) as last_follow_up
+       FROM customers c
+       WHERE (SELECT MAX(created_at) FROM optometry_records WHERE customer_id = c.id AND status = 'active') IS NOT NULL
+       ORDER BY last_visit ASC`
+    )
+    .all();
+
+  const customers = rows.map((row: any) => {
+    const lastVisit = new Date(row.last_visit);
+    const nextReview = new Date(lastVisit);
+    nextReview.setMonth(nextReview.getMonth() + 6);
+    const daysUntilReview = Math.ceil((nextReview.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+    let status: 'overdue' | 'upcoming' | 'followed_up' | 'normal';
+    if (daysUntilReview < 0) {
+      status = 'overdue';
+    } else if (daysUntilReview <= 30) {
+      status = 'upcoming';
+    } else {
+      status = 'normal';
+    }
+
+    let hasFollowUpNotVisited = false;
+    if (row.last_follow_up && status !== 'normal') {
+      const lastFollowUp = new Date(row.last_follow_up);
+      if (lastFollowUp > lastVisit) {
+        hasFollowUpNotVisited = true;
+        status = 'followed_up';
+      }
+    }
+
+    return {
+      id: row.id,
+      name: row.name,
+      phone: row.phone,
+      lastVisit: row.last_visit,
+      nextReviewDate: nextReview.toISOString().slice(0, 10),
+      daysUntilReview,
+      status,
+      lastFollowUp: row.last_follow_up,
+      hasFollowUpNotVisited,
+    };
+  });
+
+  res.json(customers);
+});
+
 router.get('/:id', (req: Request, res: Response) => {
   const id = parseInt(req.params.id);
   const customerRow = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as any;

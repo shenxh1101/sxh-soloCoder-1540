@@ -17,6 +17,7 @@ import type {
   FollowUpRecord,
   PurchaseOrder,
   CustomerDetailResponse,
+  Supplier,
 } from '../../shared/types';
 
 interface AppState {
@@ -26,10 +27,13 @@ interface AppState {
   lenses: LensInventory[];
   frames: FrameInventory[];
   alerts: InventoryAlert[];
+  suppliers: Supplier[];
   monthlyStats: (MonthlyStats & { year: string; month: string }) | null;
   lensSalesStats: LensSalesStat[];
   transactions: InventoryTransaction[];
   purchaseOrders: PurchaseOrder[];
+  reviewTodo: any[];
+  reconciliation: any | null;
   loading: boolean;
   error: string | null;
 
@@ -38,9 +42,14 @@ interface AppState {
   fetchOptometryRecords: (year?: string, month?: string, includeVoided?: boolean) => Promise<void>;
   fetchInventory: () => Promise<void>;
   fetchAlerts: () => Promise<void>;
+  fetchSuppliers: () => Promise<void>;
+  createSupplier: (data: Partial<Supplier>) => Promise<Supplier>;
+  updateSupplier: (id: number, data: Partial<Supplier>) => Promise<Supplier>;
   fetchStatistics: (year?: string, month?: string) => Promise<void>;
+  fetchReconciliation: (year?: string, month?: string) => Promise<void>;
   fetchTransactions: (itemType?: string, year?: string, month?: string) => Promise<void>;
-  fetchPurchaseOrders: () => Promise<void>;
+  fetchPurchaseOrders: (status?: string, paymentStatus?: string) => Promise<void>;
+  fetchReviewTodo: () => Promise<void>;
 
   createOptometry: (data: any) => Promise<number>;
   updateOptometry: (id: number, data: Partial<OptometryRecord>) => Promise<void>;
@@ -48,7 +57,12 @@ interface AppState {
   restockLens: (id: number, quantity: number) => Promise<void>;
   restockFrame: (id: number, quantity: number) => Promise<void>;
   addFollowUp: (customerId: number, data: { type: 'phone' | 'visit' | 'other'; result: string; notes?: string }) => Promise<FollowUpRecord>;
-  createPurchaseOrder: (items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[]) => Promise<PurchaseOrder>;
+  createPurchaseOrder: (data: {
+    items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[];
+    supplierId?: number;
+    orderDate?: string;
+  }) => Promise<PurchaseOrder>;
+  updatePurchaseOrder: (id: number, data: Partial<PurchaseOrder>) => Promise<PurchaseOrder>;
   completePurchaseOrder: (id: number) => Promise<void>;
 }
 
@@ -59,10 +73,13 @@ export const useStore = create<AppState>((set, get) => ({
   lenses: [],
   frames: [],
   alerts: [],
+  suppliers: [],
   monthlyStats: null,
   lensSalesStats: [],
   transactions: [],
   purchaseOrders: [],
+  reviewTodo: [],
+  reconciliation: null,
   loading: false,
   error: null,
 
@@ -126,6 +143,36 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
+  fetchSuppliers: async () => {
+    try {
+      const data = await inventoryApi.suppliers();
+      set({ suppliers: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
+  createSupplier: async (data) => {
+    const result = await inventoryApi.createSupplier(data);
+    await get().fetchSuppliers();
+    return result;
+  },
+
+  updateSupplier: async (id, data) => {
+    const result = await inventoryApi.updateSupplier(id, data);
+    await get().fetchSuppliers();
+    return result;
+  },
+
+  fetchReviewTodo: async () => {
+    try {
+      const data = await customersApi.getReviewTodo();
+      set({ reviewTodo: data });
+    } catch (e: any) {
+      set({ error: e.message });
+    }
+  },
+
   fetchStatistics: async (year, month) => {
     set({ loading: true, error: null });
     try {
@@ -134,6 +181,18 @@ export const useStore = create<AppState>((set, get) => ({
         statisticsApi.lensSales(year, month),
       ]);
       set({ monthlyStats: monthly, lensSalesStats: lensSales });
+    } catch (e: any) {
+      set({ error: e.message });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  fetchReconciliation: async (year, month) => {
+    set({ loading: true, error: null });
+    try {
+      const data = await statisticsApi.reconciliation(year, month);
+      set({ reconciliation: data });
     } catch (e: any) {
       set({ error: e.message });
     } finally {
@@ -187,10 +246,10 @@ export const useStore = create<AppState>((set, get) => ({
     return result;
   },
 
-  fetchPurchaseOrders: async () => {
+  fetchPurchaseOrders: async (status, paymentStatus) => {
     set({ loading: true, error: null });
     try {
-      const data = await inventoryApi.purchaseOrders();
+      const data = await inventoryApi.purchaseOrders(status, paymentStatus);
       set({ purchaseOrders: data });
     } catch (e: any) {
       set({ error: e.message });
@@ -199,8 +258,14 @@ export const useStore = create<AppState>((set, get) => ({
     }
   },
 
-  createPurchaseOrder: async (items) => {
-    const result = await inventoryApi.createPurchaseOrder(items);
+  createPurchaseOrder: async (data) => {
+    const result = await inventoryApi.createPurchaseOrder(data);
+    await get().fetchPurchaseOrders();
+    return result;
+  },
+
+  updatePurchaseOrder: async (id, data) => {
+    const result = await inventoryApi.updatePurchaseOrder(id, data);
     await get().fetchPurchaseOrders();
     return result;
   },

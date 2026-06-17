@@ -93,10 +93,25 @@ export interface FollowUpRecord {
   createdAt: string;
 }
 
+export interface Supplier {
+  id: number;
+  name: string;
+  contactPerson: string;
+  phone: string;
+  address: string;
+  notes: string;
+  createdAt: string;
+}
+
 export interface PurchaseOrder {
   id: number;
   status: 'pending' | 'completed';
+  supplierId: number | null;
+  supplierName: string | null;
+  orderDate: string;
   totalAmount: number;
+  paymentStatus: 'unpaid' | 'partial' | 'paid';
+  paidAmount: number;
   createdAt: string;
   completedAt: string | null;
   items: PurchaseOrderItem[];

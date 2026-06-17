@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '../db/index.js';
-import type { PurchaseOrder, PurchaseOrderItem } from '../../shared/types.js';
+import type { PurchaseOrder, PurchaseOrderItem, Supplier } from '../../shared/types.js';
 
 const router = Router();
 
@@ -252,15 +252,101 @@ router.get('/transactions', (req: Request, res: Response) => {
   res.json(transactions);
 });
 
-router.get('/purchase-orders', (_req: Request, res: Response) => {
-  const rows = db.prepare(`
-    SELECT po.*,
-           COALESCE(SUM(poi.quantity * poi.cost_price), 0) as total_amount
+router.get('/suppliers', (_req: Request, res: Response) => {
+  const rows = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
+  const suppliers: Supplier[] = rows.map((row: any) => ({
+    id: row.id,
+    name: row.name,
+    contactPerson: row.contact_person,
+    phone: row.phone,
+    address: row.address,
+    notes: row.notes,
+    createdAt: row.created_at,
+  }));
+  res.json(suppliers);
+});
+
+router.post('/suppliers', (req: Request, res: Response) => {
+  const { name, contactPerson, phone, address, notes } = req.body;
+
+  if (!name) {
+    res.status(400).json({ error: '供应商名称不能为空' });
+    return;
+  }
+
+  const result = db.prepare(`
+    INSERT INTO suppliers (name, contact_person, phone, address, notes)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(name, contactPerson || '', phone || '', address || '', notes || '');
+
+  const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(result.lastInsertRowid) as any;
+  res.json({
+    id: supplier.id,
+    name: supplier.name,
+    contactPerson: supplier.contact_person,
+    phone: supplier.phone,
+    address: supplier.address,
+    notes: supplier.notes,
+    createdAt: supplier.created_at,
+  });
+});
+
+router.put('/suppliers/:id', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const { name, contactPerson, phone, address, notes } = req.body;
+
+  const existing = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
+  if (!existing) {
+    res.status(404).json({ error: '供应商不存在' });
+    return;
+  }
+
+  db.prepare(`
+    UPDATE suppliers 
+    SET name = COALESCE(?, name),
+        contact_person = COALESCE(?, contact_person),
+        phone = COALESCE(?, phone),
+        address = COALESCE(?, address),
+        notes = COALESCE(?, notes)
+    WHERE id = ?
+  `).run(name, contactPerson, phone, address, notes, id);
+
+  const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id) as any;
+  res.json({
+    id: supplier.id,
+    name: supplier.name,
+    contactPerson: supplier.contact_person,
+    phone: supplier.phone,
+    address: supplier.address,
+    notes: supplier.notes,
+    createdAt: supplier.created_at,
+  });
+});
+
+router.get('/purchase-orders', (req: Request, res: Response) => {
+  const status = req.query.status as string;
+  const paymentStatus = req.query.paymentStatus as string;
+
+  let query = `
+    SELECT po.*, s.name as supplier_name
     FROM purchase_orders po
-    LEFT JOIN purchase_order_items poi ON po.id = poi.purchase_order_id
-    GROUP BY po.id
-    ORDER BY po.created_at DESC
-  `).all();
+    LEFT JOIN suppliers s ON po.supplier_id = s.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (status) {
+    query += ' AND po.status = ?';
+    params.push(status);
+  }
+  if (paymentStatus) {
+    query += ' AND po.payment_status = ?';
+    params.push(paymentStatus);
+  }
+
+  query += ' ORDER BY po.created_at DESC';
+
+  const rows = db.prepare(query).all(...params);
 
   const orders = rows.map((row: any) => {
     const items = db.prepare(`
@@ -270,7 +356,12 @@ router.get('/purchase-orders', (_req: Request, res: Response) => {
     return {
       id: row.id,
       status: row.status,
+      supplierId: row.supplier_id,
+      supplierName: row.supplier_name,
+      orderDate: row.order_date,
       totalAmount: row.total_amount,
+      paymentStatus: row.payment_status,
+      paidAmount: row.paid_amount,
       createdAt: row.created_at,
       completedAt: row.completed_at,
       items: items.map((item: any) => ({
@@ -290,8 +381,10 @@ router.get('/purchase-orders', (_req: Request, res: Response) => {
 });
 
 router.post('/purchase-orders', (req: Request, res: Response) => {
-  const { items } = req.body as {
+  const { items, supplierId, orderDate } = req.body as {
     items: { itemType: 'lens' | 'frame'; itemId: number; quantity: number }[];
+    supplierId?: number;
+    orderDate?: string;
   };
 
   if (!items || items.length === 0) {
@@ -299,10 +392,13 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
     return;
   }
 
+  const today = new Date().toISOString().slice(0, 10);
+
   const tx = db.transaction(() => {
     const poResult = db.prepare(`
-      INSERT INTO purchase_orders (status) VALUES ('pending')
-    `).run();
+      INSERT INTO purchase_orders (status, supplier_id, order_date, payment_status, paid_amount)
+      VALUES ('pending', ?, ?, 'unpaid', 0)
+    `).run(supplierId || null, orderDate || today);
     const poId = poResult.lastInsertRowid;
 
     let totalAmount = 0;
@@ -320,13 +416,15 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
         const lens = db.prepare('SELECT * FROM lens_inventory WHERE id = ?').get(item.itemId) as any;
         if (!lens) throw new Error(`镜片 ID ${item.itemId} 不存在`);
         itemName = lens.name;
-        costPrice = lens.costPrice;
+        costPrice = lens.cost_price;
       } else {
         const frame = db.prepare('SELECT * FROM frame_inventory WHERE id = ?').get(item.itemId) as any;
         if (!frame) throw new Error(`镜架 ID ${item.itemId} 不存在`);
         itemName = `${frame.brand} ${frame.model}`;
-        costPrice = frame.costPrice;
+        costPrice = frame.cost_price;
       }
+
+      if (item.quantity <= 0) throw new Error('采购数量必须大于0');
 
       insertItem.run(poId, item.itemType, item.itemId, itemName, item.quantity, costPrice);
       totalAmount += item.quantity * costPrice;
@@ -339,12 +437,10 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
   try {
     const poId = tx();
     const orderRow = db.prepare(`
-      SELECT po.*,
-             COALESCE(SUM(poi.quantity * poi.cost_price), 0) as total_amount
+      SELECT po.*, s.name as supplier_name
       FROM purchase_orders po
-      LEFT JOIN purchase_order_items poi ON po.id = poi.purchase_order_id
+      LEFT JOIN suppliers s ON po.supplier_id = s.id
       WHERE po.id = ?
-      GROUP BY po.id
     `).get(poId) as any;
 
     const items = db.prepare(`
@@ -354,7 +450,12 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
     const order: PurchaseOrder = {
       id: orderRow.id,
       status: orderRow.status,
+      supplierId: orderRow.supplier_id,
+      supplierName: orderRow.supplier_name,
+      orderDate: orderRow.order_date,
       totalAmount: orderRow.total_amount,
+      paymentStatus: orderRow.payment_status,
+      paidAmount: orderRow.paid_amount,
       createdAt: orderRow.created_at,
       completedAt: orderRow.completed_at,
       items: items.map((item: any) => ({
@@ -373,6 +474,68 @@ router.post('/purchase-orders', (req: Request, res: Response) => {
   } catch (err: any) {
     res.status(400).json({ error: err.message || '创建采购单失败' });
   }
+});
+
+router.put('/purchase-orders/:id', (req: Request, res: Response) => {
+  const id = parseInt(req.params.id);
+  const { supplierId, orderDate, paymentStatus, paidAmount } = req.body;
+
+  const existing = db.prepare('SELECT * FROM purchase_orders WHERE id = ?').get(id);
+  if (!existing) {
+    res.status(404).json({ error: '采购单不存在' });
+    return;
+  }
+
+  db.prepare(`
+    UPDATE purchase_orders 
+    SET supplier_id = COALESCE(?, supplier_id),
+        order_date = COALESCE(?, order_date),
+        payment_status = COALESCE(?, payment_status),
+        paid_amount = COALESCE(?, paid_amount)
+    WHERE id = ?
+  `).run(
+    supplierId !== undefined ? supplierId : null,
+    orderDate,
+    paymentStatus,
+    paidAmount,
+    id
+  );
+
+  const orderRow = db.prepare(`
+    SELECT po.*, s.name as supplier_name
+    FROM purchase_orders po
+    LEFT JOIN suppliers s ON po.supplier_id = s.id
+    WHERE po.id = ?
+  `).get(id) as any;
+
+  const items = db.prepare(`
+    SELECT * FROM purchase_order_items WHERE purchase_order_id = ?
+  `).all(id) as any[];
+
+  const order: PurchaseOrder = {
+    id: orderRow.id,
+    status: orderRow.status,
+    supplierId: orderRow.supplier_id,
+    supplierName: orderRow.supplier_name,
+    orderDate: orderRow.order_date,
+    totalAmount: orderRow.total_amount,
+    paymentStatus: orderRow.payment_status,
+    paidAmount: orderRow.paid_amount,
+    createdAt: orderRow.created_at,
+    completedAt: orderRow.completed_at,
+    items: items.map((item: any) => ({
+      id: item.id,
+      purchaseOrderId: item.purchase_order_id,
+      itemType: item.item_type,
+      itemId: item.item_id,
+      itemName: item.item_name,
+      quantity: item.quantity,
+      costPrice: item.cost_price,
+      createdAt: item.created_at,
+    })),
+  };
+
+  res.json(order);
 });
 
 router.post('/purchase-orders/:id/complete', (req: Request, res: Response) => {
